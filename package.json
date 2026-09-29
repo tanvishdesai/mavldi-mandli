@@ -1,0 +1,23 @@
+{
+  "name": "mavladi-mandli",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mavladi Mandli — Navratri garba pass booking with UPI payment and manual verification",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "seed": "node server/seed.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "UNLICENSED",
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^4.22.3",
+    "multer": "^2.4.0",
+    "qrcode": "^1.5.4"
+  }
+}

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mavladi Mandli — Navratri 2026 Garba Passes</title>
+  <meta name="description" content="માવલડી મંડળી — nine nights of garba in the Mother's courtyard. Book your Navratri 2026 passes online and pay by UPI.">
+  <meta name="theme-color" content="#1f0506">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Mavladi Mandli — Navratri 2026">
+  <meta property="og:description" content="Nine nights of garba in the Mother's courtyard. Book your passes online.">
+  <meta property="og:image" content="/assets/img/og.jpg">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/img/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Hind+Vadodara:wght@400;500;600&family=Rasa:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preload" as="image" href="/assets/img/gate.webp">
+  <link rel="stylesheet" href="/assets/css/base.css">
+  <link rel="stylesheet" href="/assets/css/home.css">
+  <script>document.documentElement.classList.replace('no-js', 'js');</script>
+</head>
+<body class="home">
+  <a class="skip" href="#book">Skip to booking</a>
+
+  <header class="hud">
+    <a class="brandmark" href="/" aria-label="Mavladi Mandli — home">
+      <img src="/assets/img/logo-sm.webp" alt="" width="60" height="70">
+      <span><b>માવલડી મંડળી</b><small>The Reality of Culture</small></span>
+    </a>
+    <nav class="hudnav" aria-label="Main">
+      <a class="opt" href="#venues" data-go="venues">Venues</a>
+      <a class="opt" href="#faq" data-go="faq">FAQ</a>
+      <a href="/ticket">My Pass</a>
+      <a class="btn gold sm" href="/book">Book Passes</a>
+    </nav>
+  </header>
+
+  <div id="stage">
+    <canvas id="world" aria-hidden="true"></canvas>
+    <div id="gate" aria-hidden="true"><img src="/assets/img/gate.webp" alt="" width="1600" height="900" fetchpriority="high"></div>
+    <canvas id="embers" aria-hidden="true"></canvas>
+    <div class="vignette" aria-hidden="true"></div>
+
+    <main id="depth">
+      <section class="hero live" id="hero" aria-labelledby="hero-h">
+        <p class="eyebrow rise" data-cfg="tagline_gu">મા ના આંગણે રંગોત્સવ</p>
+        <h1 class="rise" id="hero-h">Nine nights in the<br>Mother’s courtyard</h1>
+        <p class="when rise"><span data-cfg="event_title">Navratri 2026</span><span data-cfg="event_dates_text">11th – 19th October, 2026</span><span data-cfg="event_time_text">8:30 pm onwards</span></p>
+        <div class="ctas rise">
+          <a class="btn gold" href="/book">Book Passes</a>
+          <a class="btn ghost-light" href="/ticket">Check my pass</a>
+        </div>
+        <div class="cue rise" aria-hidden="true"><i></i>scroll in</div>
+      </section>
+
+      <section class="panel" id="courtyard" data-label="The courtyard" aria-labelledby="courtyard-h">
+        <p class="kicker">મા નું આંગણું</p>
+        <h2 id="courtyard-h">Where the circle never breaks</h2>
+        <p class="lede" data-cfg="about_text">Mavladi is a sheri-style garba raised in the courtyard of the Mother. Nine nights of dhol, diya and devotion — where the old circles are danced the old way, and every family finds its place in the ring.</p>
+        <div class="facts">
+          <div><b>9</b><span>nights</span></div>
+          <div><b id="f-venues">2</b><span>venues</span></div>
+          <div><b>1</b><span>circle</span></div>
+        </div>
+      </section>
+
+      <section class="panel" id="nights" data-label="Nine nights" aria-labelledby="nights-h">
+        <p class="kicker">નવ રાત · નવ સ્વરૂપ</p>
+        <h2 id="nights-h">Nine nights, nine forms of the Mother</h2>
+        <div class="nights" id="nightList"></div>
+      </section>
+
+      <section class="panel" id="venues" data-label="Venues" aria-labelledby="venues-h">
+        <p class="kicker">આંગણું પસંદ કરો</p>
+        <h2 id="venues-h">Choose your ground</h2>
+        <div class="venues" id="venueList"><p class="lede">Loading venues…</p></div>
+      </section>
+
+      <section class="panel" id="how" data-label="How to book" aria-labelledby="how-h">
+        <p class="kicker">પાસ કેવી રીતે મેળવશો</p>
+        <h2 id="how-h">Your pass, in four steps</h2>
+        <div class="steps">
+          <div class="step">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg></span>
+            <h3>Pick your nights</h3><p>Choose a venue, the nights you want and how many passes.</p>
+          </div>
+          <div class="step">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M14 14h3v3M21 14v.01M14 21h7v-4"/></svg></span>
+            <h3>Pay by UPI</h3><p>Scan the QR or pay to our UPI ID from any app — GPay, PhonePe, Paytm.</p>
+          </div>
+          <div class="step">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/></svg></span>
+            <h3>Upload the proof</h3><p>Attach the payment screenshot and the UTR number.</p>
+          </div>
+          <div class="step">
+            <span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4a2 2 0 0 0 0-4z"/><path d="m9 12 2 2 4-4"/></svg></span>
+            <h3>Get your e-pass</h3><p>We verify the payment and your QR pass goes live. Show it at the gate.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="faq" data-label="Questions" aria-labelledby="faq-h">
+        <p class="kicker">પ્રશ્નો</p>
+        <h2 id="faq-h">Before you come</h2>
+        <div class="qas" id="faqList"></div>
+      </section>
+
+      <section class="panel finale" id="book" data-label="Book" aria-labelledby="book-h">
+        <img class="mark" src="/assets/img/logo.webp" alt="Mavladi" width="724" height="829" loading="lazy">
+        <h2 id="book-h" class="sr-only">Book your passes</h2>
+        <p class="gu-line">જ્યાં ભક્તિ મળે રંગ અને તાલને…</p>
+        <div class="ctas">
+          <a class="btn gold" href="/book">Book Passes</a>
+          <a class="btn ghost-light" href="/ticket">My Pass</a>
+        </div>
+        <p class="contact" id="contactLine"></p>
+        <p class="legal">© Mavladi Mandli · જય માતાજી</p>
+      </section>
+    </main>
+  </div>
+  <div id="spacer" aria-hidden="true"></div>
+
+  <nav class="rail" id="rail" aria-label="Sections"></nav>
+  <div class="dock" id="dock"><a class="btn gold" href="/book">Book Passes</a></div>
+
+  <script src="/assets/js/common.js"></script>
+  <script src="/assets/js/home.js"></script>
+</body>
+</html>

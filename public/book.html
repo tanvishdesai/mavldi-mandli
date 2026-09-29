@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Book Passes — Mavladi Mandli</title>
+  <meta name="description" content="Book Mavladi Mandli Navratri garba passes. Pick your venue and nights, pay by UPI.">
+  <meta name="theme-color" content="#f4e7cf">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=Hind+Vadodara:wght@400;500;600&family=Rasa:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/css/base.css">
+  <link rel="stylesheet" href="/assets/css/pages.css">
+</head>
+<body class="paper">
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="toran" aria-hidden="true"></div>
+  <header class="topbar">
+    <div class="in">
+      <a class="brandmark" href="/"><img src="/assets/img/logo-sm.webp" alt="" width="38" height="44"><span><b>માવલડી મંડળી</b><small>The Reality of Culture</small></span></a>
+      <nav class="topnav" aria-label="Main"><a href="/">Home</a><a href="/book" aria-current="page">Book</a><a href="/ticket">My Pass</a></nav>
+    </div>
+  </header>
+
+  <main id="main" class="wrap">
+    <div class="pagehead">
+      <span class="branch" aria-hidden="true"></span>
+      <span class="branch r" aria-hidden="true"></span>
+      <p class="gu">પાસ બુક કરો</p>
+      <h1 id="pageTitle">Book your passes</h1>
+      <p class="sub" id="pageSub">Pick a ground, choose your nights, and pay by UPI.</p>
+    </div>
+
+    <ol class="stepper" id="stepper">
+      <li class="on"><b>1</b><span>Choose passes</span></li>
+      <li><b>2</b><span>Your details</span></li>
+      <li><b>3</b><span>Pay by UPI</span></li>
+      <li><b>4</b><span>Get your e-pass</span></li>
+    </ol>
+
+    <!-- step 1 -->
+    <section id="stepPick" class="booking" aria-label="Choose passes">
+      <div>
+        <div id="closedNote" class="notice bad" hidden>Online bookings are closed right now. Please check back soon.</div>
+        <div class="venuepick" id="venuePick" role="group" aria-label="Venue"></div>
+        <p class="vinfo" id="venueInfo"></p>
+        <div id="passArea"><p class="summary empty">Loading passes…</p></div>
+      </div>
+      <aside class="card frame summary pick" aria-label="Your selection">
+        <h3>Your passes</h3>
+        <div id="sumBody"></div>
+      </aside>
+    </section>
+
+    <!-- step 2 -->
+    <section id="stepDetails" class="booking" hidden aria-label="Your details">
+      <form class="card formcard" id="detailsForm" novalidate>
+        <h2>Who is coming?</h2>
+        <div class="stack">
+          <div class="notice bad formerr" id="formErr" role="alert"></div>
+          <label class="field"><span>Full name</span><input name="name" autocomplete="name" required maxlength="80" placeholder="As you’d like it on the pass"></label>
+          <div class="grid2">
+            <label class="field"><span>Mobile number</span><input name="phone" type="tel" inputmode="numeric" autocomplete="tel-national" required maxlength="14" placeholder="10-digit mobile"><small>Used to find your booking later.</small></label>
+            <label class="field"><span>Email <em style="font-weight:400;color:var(--ink-3)">(optional)</em></span><input name="email" type="email" autocomplete="email" maxlength="120" placeholder="you@example.com"></label>
+          </div>
+          <label class="field"><span>Anything we should know? <em style="font-weight:400;color:var(--ink-3)">(optional)</em></span><textarea name="note" maxlength="500" placeholder="e.g. names of the others in your group"></textarea></label>
+          <label class="check"><input type="checkbox" name="terms" required><span id="termsText">I agree that passes are non-transferable and non-refundable once confirmed.</span></label>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:space-between;align-items:center">
+            <button type="button" class="btn ghost" id="backBtn">← Change passes</button>
+            <button type="submit" class="btn" id="reserveBtn">Reserve &amp; pay</button>
+          </div>
+        </div>
+      </form>
+      <aside class="card frame summary" aria-label="Order summary">
+        <h3>Order summary</h3>
+        <div id="sumBody2"></div>
+      </aside>
+    </section>
+  </main>
+
+  <div class="cartbar" id="cartbar">
+    <div><small id="cbCount">0 passes</small><b id="cbTotal">₹0</b></div>
+    <button class="btn gold" id="cbGo" type="button">Continue</button>
+  </div>
+
+  <footer class="sitefoot">© Mavladi Mandli · જય માતાજી · <a href="/ticket">Find my booking</a></footer>
+
+  <script src="/assets/js/common.js"></script>
+  <script src="/assets/js/book.js"></script>
+</body>
+</html>
