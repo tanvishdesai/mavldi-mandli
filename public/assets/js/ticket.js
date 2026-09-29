@@ -1,14 +1,14 @@
 /* Ticket page: pay → upload proof → wait for verification → e-pass. */
 (function () {
   'use strict';
-  const { api, esc, inr, dateLong, when, toast, mine, statusPill, busy } = window.MV;
+  const { q, m, a, watch, upload, qr, fns, esc, inr, dateLong, when, toast, mine, statusPill, busy } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const view = $('#view');
 
   const params = new URLSearchParams(location.search);
   let code = (params.get('code') || '').toUpperCase();
   let token = params.get('t') || '';
-  let booking = null, cfg = {}, timer = 0, poll = 0;
+  let booking = null, cfg = {}, timer = 0, unwatch = null, shownKey = '';
   const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
   window.MV.config().then((c) => { cfg = c; if (booking) render(); }).catch(() => {});
@@ -22,17 +22,22 @@
     $('#headSub').textContent = sub || '';
   }
 
-  async function load(quiet) {
-    try {
-      booking = await api(`/api/bookings/${encodeURIComponent(code)}?t=${encodeURIComponent(token)}`);
-      mine.add({ code, token, amount: booking.amount, status: booking.status });
-      render();
-    } catch (e) {
-      if (quiet) return;
-      head('મારો પાસ', 'Booking not found', '');
-      view.innerHTML = `<div class="card lookup"><div class="notice bad">${esc(e.message)}</div></div>`;
-      lookupView(true);
-    }
+  /* Live: the page changes by itself the moment the team confirms. */
+  function load() {
+    if (unwatch) unwatch();
+    unwatch = watch(fns.public.booking, { code, secret: token }, (b) => {
+      if (!b) {
+        head('મારો પાસ', 'Booking not found', '');
+        view.innerHTML = '<div class="card lookup"><div class="notice bad">We couldn’t find that booking. Check the link, or look it up below.</div></div>';
+        lookupView(true);
+        return;
+      }
+      booking = b;
+      mine.add({ code, token, amount: b.amount, status: b.status });
+      // don't wipe a half-filled upload form just because something minor changed
+      const key = [b.status, b.message, b.checkins.length, b.expires_at].join('|');
+      if (key !== shownKey) { shownKey = key; render(); }
+    }, (e) => toast(e.message, 'bad'));
   }
 
   function contactHtml() {
@@ -48,7 +53,7 @@
   }
 
   function render() {
-    clearInterval(timer); clearInterval(poll);
+    clearInterval(timer);
     const b = booking;
     $('#stepper').hidden = !['awaiting_payment', 'pending', 'confirmed'].includes(b.status);
     const steps = document.querySelectorAll('#stepper li');
@@ -66,13 +71,11 @@
         <p style="font-size:.9rem;color:var(--ink-3)">Keep this page bookmarked, or find it later from “My Pass” with code <b>${esc(b.code)}</b> and your phone number.</p>
         <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
           <button class="btn ghost sm" id="copyLink" type="button">Copy link to this page</button>
-          <button class="btn ghost sm" id="refresh" type="button">Check again</button>
         </div>
+        <p class="muted" style="font-size:.85rem;color:var(--ink-3)">This page updates by itself — no need to refresh.</p>
       </div>
       <div class="card" style="padding:20px 24px"><h3 style="font-family:var(--f-display);font-size:1.3rem;color:var(--maroon-700);margin-bottom:10px">Booking ${esc(b.code)} · ${inr(b.amount)}</h3>${itemsHtml(b)}</div>`;
-      $('#refresh').onclick = () => load();
       $('#copyLink').onclick = copyLink;
-      poll = setInterval(() => load(true), 20000);
       return;
     }
     if (b.status === 'confirmed') return renderPass(b);
@@ -108,7 +111,7 @@
   function renderPay(b) {
     head('ચુકવણી કરો', 'Complete your payment', `Booking ${b.code} · passes held for you`);
     const pay = b.payment;
-    const qr = pay.qr_image || pay.qr;
+    const qrSrc = pay.qr_image || qr(pay.uri);
     view.innerHTML = `
       ${b.message ? `<div class="notice info"><b>Note from the team:</b>&nbsp;${esc(b.message)}</div>` : ''}
       <div class="paygrid">
@@ -118,7 +121,7 @@
           <p style="color:var(--ink-3);font-size:.9rem">to <b style="color:var(--ink)">${esc(pay.payee)}</b></p>
           <p style="margin-top:10px"><span class="timer" id="timer" role="timer">⏳ <span>--:--</span> left to pay</span></p>
           <div class="qrbox"><span class="corner c1"></span><span class="corner c2"></span><span class="corner c3"></span><span class="corner c4"></span>
-            <img src="${esc(qr)}" alt="UPI QR code to pay ${inr(b.amount)}" width="260" height="260"></div>
+            <img src="${esc(qrSrc)}" alt="UPI QR code to pay ${inr(b.amount)}" width="260" height="260"></div>
           <p style="font-size:.88rem;color:var(--ink-2)">${pay.qr_image ? `Scan with any UPI app and enter <b>${inr(b.amount)}</b>` : 'Scan with any UPI app — the amount is filled in for you'}</p>
           <div class="upi"><code id="upiId">${esc(pay.upi_id)}</code><button class="btn sm" type="button" id="copyUpi">Copy</button></div>
           ${isMobile ? `<a class="btn gold block" style="margin-top:14px" href="${esc(pay.uri)}">Open UPI app to pay</a>` : ''}
@@ -164,7 +167,7 @@
       const ms = new Date(b.expires_at) - Date.now();
       const el = $('#timer');
       if (!el) return;
-      if (ms <= 0) { clearInterval(timer); el.querySelector('span').textContent = '0:00'; load(true); return; }
+      if (ms <= 0) { clearInterval(timer); el.querySelector('span').textContent = '0:00'; return; }
       const m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
       const h = Math.floor(m / 60);
       el.querySelector('span').textContent = h ? `${h}h ${m % 60}m` : `${m}:${String(s).padStart(2, '0')}`;
@@ -175,7 +178,7 @@
     $('#copyUpi').onclick = () => copy(pay.upi_id, 'UPI ID copied');
     $('#cancelBtn').onclick = async () => {
       if (!confirm('Cancel this booking and release the passes? Do this only if you have NOT paid.')) return;
-      try { booking = await api(`/api/bookings/${code}/cancel?t=${encodeURIComponent(token)}`, { method: 'POST' }); render(); }
+      try { await m(fns.public.cancelBooking, { code, secret: token }); }
       catch (e) { toast(e.message, 'bad'); }
     };
 
@@ -203,19 +206,18 @@
       if (f.size > 8 * 1024 * 1024) return fail('That image is too large (max 8 MB).');
       if (!/^[A-Za-z0-9]{6,35}$/.test(utr)) { form.utr.focus(); return fail('Enter the UTR / transaction ID from your payment app (usually 12 digits).'); }
       const btn = $('#sendBtn');
+      if (!/^image\/(jpeg|png|webp|gif)$/.test(f.type)) return fail('Please upload a JPG, PNG or WebP image (HEIC photos: take a screenshot instead).');
       busy(btn, true, 'Uploading…');
-      const fd = new FormData();
-      fd.append('screenshot', f);
-      fd.append('utr', utr);
       try {
-        booking = await api(`/api/bookings/${code}/payment?t=${encodeURIComponent(token)}`, { method: 'POST', body: fd });
+        const url = await m(fns.public.uploadUrl, { code, secret: token });
+        const storageId = await upload(url, f);
+        const res = await a(fns.public.submitPayment, { code, secret: token, utr, storageId });
+        if (res.error) { busy(btn, false); fail(res.error); return; }
         toast('Payment proof received 🙏', 'ok');
-        render();
         scrollTo({ top: 0, behavior: 'smooth' });
       } catch (ex) {
         busy(btn, false);
         fail(ex.message);
-        if (ex.status === 409) load(true);
       }
     });
   }
@@ -237,7 +239,7 @@
           <div class="who"><div><small>Guest</small><b>${esc(b.name)}</b></div><div style="text-align:right"><small>Booking</small><div class="code">${esc(b.code)}</div></div></div>
           ${itemsHtml(b)}
           <div class="perf" aria-hidden="true"></div>
-          <div class="qr"><img src="${esc(b.ticket_qr)}" alt="Entry QR code for booking ${esc(b.code)}" width="230" height="230"></div>
+          <div class="qr"><img src="${esc(qr(`${location.origin}/admin/#checkin/${b.code}`, { ec: 'Q' }))}" alt="Entry QR code for booking ${esc(b.code)}" width="230" height="230"></div>
         </div>
         <p class="foot">Verified ${esc(when(b.verified_at))}${b.items.some((i) => !i.date) ? ' · valid all nights' : nights.length ? ` · valid for ${new Set(nights).size} night${new Set(nights).size > 1 ? 's' : ''}` : ''}<br>Non-transferable · traditional attire please</p>
       </article>
@@ -279,9 +281,8 @@
       const btn = $('#lookBtn');
       busy(btn, true, 'Looking…');
       try {
-        const rows = await api('/api/lookup', { method: 'POST', body: { code: f.code.value.trim(), phone: f.phone.value } });
-        const r = rows[0];
-        location.href = `/ticket?code=${encodeURIComponent(r.code)}&t=${encodeURIComponent(r.token)}`;
+        const r = await m(fns.public.lookup, { code: f.code.value.trim(), phone: f.phone.value });
+        location.href = `/ticket?code=${encodeURIComponent(r.code)}&t=${encodeURIComponent(r.secret)}`;
       } catch (ex) {
         busy(btn, false);
         err.textContent = ex.message; err.classList.add('on');

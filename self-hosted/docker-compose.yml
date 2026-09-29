@@ -1,0 +1,65 @@
+# Self-hosted Convex backend + dashboard for Mavladi Mandli, behind Caddy (automatic HTTPS).
+# Based on the official compose file:
+#   https://github.com/get-convex/convex-backend/tree/main/self-hosted/docker
+#
+#   cp .env.example .env      # fill in your domains
+#   docker compose up -d
+#   docker compose exec backend ./generate_admin_key.sh
+#
+# The frontend on Vercel (HTTPS) must reach the backend over HTTPS, hence Caddy.
+services:
+  backend:
+    # pin to a specific version (e.g. :<rev>) for production if you like
+    image: ghcr.io/get-convex/convex-backend:latest
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    restart: unless-stopped
+    volumes:
+      - data:/convex/data # database (SQLite by default) + uploaded screenshots
+    environment:
+      - INSTANCE_NAME
+      - INSTANCE_SECRET
+      - CONVEX_CLOUD_ORIGIN=https://${CONVEX_API_DOMAIN}
+      - CONVEX_SITE_ORIGIN=https://${CONVEX_SITE_DOMAIN:-${CONVEX_API_DOMAIN}}
+      - DATABASE_URL
+      - POSTGRES_URL
+      - DISABLE_BEACON
+      - DOCUMENT_RETENTION_DELAY=${DOCUMENT_RETENTION_DELAY:-172800}
+      - RUST_LOG=${RUST_LOG:-info}
+    healthcheck:
+      test: curl -f http://localhost:3210/version
+      interval: 5s
+      start_period: 10s
+
+  dashboard:
+    image: ghcr.io/get-convex/convex-dashboard:latest
+    stop_grace_period: 10s
+    stop_signal: SIGINT
+    restart: unless-stopped
+    environment:
+      - NEXT_PUBLIC_DEPLOYMENT_URL=https://${CONVEX_API_DOMAIN}
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - CONVEX_API_DOMAIN
+      - CONVEX_DASHBOARD_DOMAIN
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+      - dashboard
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:

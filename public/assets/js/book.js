@@ -1,7 +1,7 @@
 /* Booking: pick passes → details → reserve (then the ticket page takes payment). */
 (function () {
   'use strict';
-  const { api, esc, inr, dateLong, dateParts, NAVDURGA, toast, mine, busy } = window.MV;
+  const { q, m, fns, secret, esc, inr, dateLong, dateParts, NAVDURGA, toast, mine, busy } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
 
   const params = new URLSearchParams(location.search);
@@ -13,14 +13,14 @@
   const cart = new Map();          // passId -> qty
   const nightIndex = new Map();    // date -> 0..8
 
-  try { for (const [k, q] of JSON.parse(sessionStorage.getItem(CART_KEY) || '[]')) cart.set(+k, +q); } catch { /* ignore */ }
+  try { for (const [k, n] of JSON.parse(sessionStorage.getItem(CART_KEY) || '[]')) cart.set(String(k), +n); } catch { /* ignore */ }
   const saveCart = () => { try { sessionStorage.setItem(CART_KEY, JSON.stringify([...cart])); } catch { /* ignore */ } };
 
   init();
 
   async function init() {
     try {
-      const [cfg, cat] = await Promise.all([window.MV.config(), api('/api/venues')]);
+      const [cfg, cat] = await Promise.all([window.MV.config(), q(fns.public.catalogue)]);
       open = cfg.booking_open === '1';
       $('#closedNote').hidden = open;
       if (cfg.terms_text) $('#termsText').textContent = `I have read and agree: ${cfg.terms_text}`;
@@ -45,7 +45,7 @@
       renderSummary();
       return;
     }
-    const want = +params.get('venue');
+    const want = params.get('venue');
     venueId = venues.some((v) => v.id === want) ? want : venues[0].id;
     // a date link from the home page: pick the first venue that has it
     const wantDate = params.get('date');
@@ -67,13 +67,13 @@
     box.hidden = venues.length < 2;
     box.innerHTML = venues.map((v) => {
       const n = v.passes.reduce((s, p) => s + (cart.get(p.id) || 0), 0);
-      return `<button type="button" class="vopt" data-v="${v.id}" aria-pressed="${v.id === venueId}">
+      return `<button type="button" class="vopt" data-v="${esc(v.id)}" aria-pressed="${v.id === venueId}">
         ${v.image ? `<img src="${esc(v.image)}" alt="">` : ''}
         <span><b>${esc(v.name)}</b><small>${esc([v.name_gu, v.city].filter(Boolean).join(' · '))}</small></span>
         <span class="n ${n ? 'on' : ''}" aria-label="${n} selected">${n}</span></button>`;
     }).join('');
     box.querySelectorAll('.vopt').forEach((b) => b.addEventListener('click', () => {
-      venueId = +b.dataset.v;
+      venueId = b.dataset.v;
       renderVenues();
       renderPasses();
     }));
@@ -97,9 +97,9 @@
       <div class="pl"><b>${esc(p.label)}</b>${sub ? `<small>${esc(sub)}</small>` : ''}${avail ? `<small>${avail}</small>` : ''}</div>
       <span class="pr">${inr(p.price)}</span>
       <div class="qty ${q ? 'has' : ''}" role="group" aria-label="${esc(p.label)} quantity">
-        <button type="button" data-d="-1" data-p="${p.id}" aria-label="One less" ${q ? '' : 'disabled'}>−</button>
+        <button type="button" data-d="-1" data-p="${esc(p.id)}" aria-label="One less" ${q ? '' : 'disabled'}>−</button>
         <output aria-live="polite">${q}</output>
-        <button type="button" data-d="1" data-p="${p.id}" aria-label="One more" ${p.bookable && q < max ? '' : 'disabled'}>+</button>
+        <button type="button" data-d="1" data-p="${esc(p.id)}" aria-label="One more" ${p.bookable && q < max ? '' : 'disabled'}>+</button>
       </div></div>`;
   }
 
@@ -142,19 +142,18 @@
   $('#passArea').addEventListener('click', (e) => {
     const b = e.target.closest('button[data-p]');
     if (!b) return;
-    const id = +b.dataset.p;
+    const id = b.dataset.p;
     const { p } = byId.get(id);
-    const q = Math.max(0, Math.min((cart.get(id) || 0) + +b.dataset.d, Math.min(p.available, p.max_per_booking)));
-    if (q) cart.set(id, q); else cart.delete(id);
+    const n = Math.max(0, Math.min((cart.get(id) || 0) + +b.dataset.d, Math.min(p.available, p.max_per_booking)));
+    if (n) cart.set(id, n); else cart.delete(id);
     saveCart();
     // re-render just this card to keep focus steady
-    const card = b.closest('.ncard');
-    const focusSel = `button[data-p="${id}"][data-d="${b.dataset.d}"]`;
+    const focusSel = `button[data-p="${CSS.escape(id)}"][data-d="${b.dataset.d}"]`;
     renderPasses();
     renderVenues();
     const again = document.querySelector(focusSel);
     if (again && !again.disabled) again.focus();
-    else document.querySelector(`button[data-p="${id}"]:not(:disabled)`)?.focus();
+    else document.querySelector(`button[data-p="${CSS.escape(id)}"]:not(:disabled)`)?.focus();
     renderSummary();
   });
 
@@ -169,7 +168,7 @@
     const list = ls.length
       ? `<ul class="lines">${ls.map((l) => `<li><span>${l.q} × ${esc(l.p.label)}</span><span class="amt">${inr(l.p.price * l.q)}</span>
           <small>${esc(l.p.date ? dateLong(l.p.date) : 'All nine nights')} · ${esc(l.v.name)}</small>
-          <button type="button" class="linkbtn x" data-rm="${l.p.id}">Remove</button></li>`).join('')}</ul>
+          <button type="button" class="linkbtn x" data-rm="${esc(l.p.id)}">Remove</button></li>`).join('')}</ul>
          <div class="total"><span>Total</span><b>${inr(total)}</b></div>`
       : '<div class="empty"><img src="/assets/svg/mandala.svg" alt="">Pick a night and tap + to add passes.</div>';
     $('#sumBody').innerHTML = list + (ls.length ? `<button class="btn block" id="goDetails" type="button" ${open ? '' : 'disabled'}>Continue</button>
@@ -177,7 +176,7 @@
     $('#sumBody2').innerHTML = list.replace(/<button[^>]*data-rm[^>]*>Remove<\/button>/g, '');
     $('#goDetails')?.addEventListener('click', toDetails);
     document.querySelectorAll('[data-rm]').forEach((b) => b.addEventListener('click', () => {
-      cart.delete(+b.dataset.rm); saveCart(); renderPasses(); renderVenues(); renderSummary();
+      cart.delete(b.dataset.rm); saveCart(); renderPasses(); renderVenues(); renderSummary();
     }));
     $('#cbCount').textContent = `${count} pass${count === 1 ? '' : 'es'}`;
     $('#cbTotal').textContent = inr(total);
@@ -239,21 +238,22 @@
     const btn = $('#reserveBtn');
     busy(btn, true, 'Reserving…');
     try {
-      const res = await api('/api/bookings', {
-        method: 'POST',
-        body: { name, phone, email: form.email.value.trim(), note: form.note.value.trim(), items: [...cart].map(([passId, qty]) => ({ passId, qty })) },
+      const key = secret();
+      const res = await m(fns.public.createBooking, {
+        name, phone, email: form.email.value.trim() || undefined, note: form.note.value.trim() || undefined,
+        items: [...cart].map(([passId, qty]) => ({ passId, qty })), secret: key,
       });
       try { localStorage.setItem('mv_me', JSON.stringify({ name, phone, email: form.email.value.trim() })); } catch { /* ignore */ }
-      mine.add({ code: res.code, token: res.token, amount: res.booking.amount });
+      mine.add({ code: res.code, token: key, amount: res.amount });
       cart.clear(); saveCart();
-      location.href = `/ticket?code=${encodeURIComponent(res.code)}&t=${encodeURIComponent(res.token)}`;
+      location.href = `/ticket?code=${encodeURIComponent(res.code)}&t=${encodeURIComponent(key)}`;
     } catch (ex) {
       busy(btn, false);
       fail(ex.message);
-      if (ex.status === 409) {
+      if (ex.code === 'SOLD_OUT') {
         // availability changed under us: refresh numbers
         toast('Availability changed — updated the list.', 'bad');
-        const cat = await api('/api/venues').catch(() => null);
+        const cat = await q(fns.public.catalogue).catch(() => null);
         if (cat) { venues = cat.venues; byId.clear(); for (const v of venues) for (const p of v.passes) byId.set(p.id, { p, v }); renderPasses(); renderSummary(); }
       }
     }

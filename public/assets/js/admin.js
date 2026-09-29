@@ -1,14 +1,24 @@
-/* Admin panel — a small hash-routed app over /api/admin. */
+/* Admin panel — a small hash-routed app over the Convex admin API.
+   Every call carries the session token that auth.login registered. */
 (function () {
   'use strict';
-  const { api, esc, inr, dateShort, when, toast, statusPill, busy, STATUS } = window.MV;
+  const { q, m, a, watch, upload, secret, fns, esc, inr, dateShort, when, toast, statusPill, busy, STATUS } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const app = $('#app');
-  const A = (path, opts) => api('/api/admin' + path, opts).catch((e) => {
-    if (e.status === 401) { showLogin(); }
-    throw e;
-  });
+  const TOKEN_KEY = 'mv_admin_token';
+  let token = '';
+  try { token = localStorage.getItem(TOKEN_KEY) || ''; } catch { /* private mode */ }
+  const F = fns.admin;
+  const authed = (p) => p.catch((e) => { if (e.code === 'UNAUTHENTICATED') showLogin(); throw e; });
+  const Q = (ref, args = {}) => authed(q(ref, { token, ...args }));
+  const M = (ref, args = {}) => authed(m(ref, { token, ...args }));
+  /* live views: subscriptions are dropped whenever the route changes */
+  let subs = [];
+  const live = (ref, args, cb) => {
+    subs.push(watch(ref, { token, ...args }, cb, (e) => { if (e.code === 'UNAUTHENTICATED') showLogin(); else toast(e.message, 'bad'); }));
+  };
+  const dropLive = () => { subs.forEach((u) => u()); subs = []; };
 
   const ICONS = {
     dashboard: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/>',
@@ -26,9 +36,8 @@
   let venuesCache = [];
   let pendingCount = 0;
 
-  boot();
   async function boot() {
-    me = await api('/api/admin/me').catch(() => ({ admin: false }));
+    me = token ? await q(fns.auth.me, { token }).catch(() => ({ admin: false })) : { admin: false };
     if (!me.admin) return showLogin();
     shell();
     addEventListener('hashchange', route);
@@ -37,7 +46,8 @@
 
   /* ---------------- login ---------------- */
   function showLogin() {
-    closeDrawer();
+    dropLive();
+    closeDrawerQuiet();
     app.innerHTML = `<div class="login"><form class="card" id="loginForm">
       <img src="/assets/img/logo.webp" alt="Mavladi">
       <h1>Admin sign in</h1>
@@ -50,7 +60,9 @@
       const btn = e.target.querySelector('button');
       busy(btn, true, 'Signing in…');
       try {
-        await api('/api/admin/login', { method: 'POST', body: { password: e.target.password.value } });
+        const t = secret(32);
+        await a(fns.auth.login, { password: e.target.password.value, token: t });
+        try { localStorage.setItem(TOKEN_KEY, t); } catch { /* ignore */ }
         location.reload();
       } catch (ex) {
         busy(btn, false);
@@ -71,29 +83,31 @@
       </nav>
       <main class="mainpane" id="pane"></main>
     </div>`;
-    $('#logout').onclick = async () => { await A('/logout', { method: 'POST' }).catch(() => {}); location.reload(); };
+    $('#logout').onclick = async () => {
+      await m(fns.auth.logout, { token }).catch(() => {});
+      try { localStorage.removeItem(TOKEN_KEY); } catch { /* ignore */ }
+      location.reload();
+    };
     $('#menuBtn').onclick = () => $('#side').classList.toggle('open');
     $('#side').addEventListener('click', (e) => { if (e.target.closest('a')) $('#side').classList.remove('open'); });
-    refreshBadge();
-    setInterval(refreshBadge, 60000);
-  }
-  async function refreshBadge() {
-    try {
-      const s = await A('/stats');
+    // the pending badge is live for the whole session
+    watch(F.stats, { token }, (s) => {
       pendingCount = (s.byStatus.find((x) => x.status === 'pending') || {}).n || 0;
       const b = $('#pendBadge');
       if (b) { b.hidden = !pendingCount; b.textContent = pendingCount; }
       document.title = (pendingCount ? `(${pendingCount}) ` : '') + 'Admin — Mavladi Mandli';
-    } catch { /* ignore */ }
+    });
   }
+  const refreshBadge = () => {};
 
   function route() {
     const [k, arg] = (location.hash.slice(1) || 'dashboard').split('/');
     $$('.side a.nav').forEach((a) => a.classList.toggle('on', a.dataset.k === (k === 'booking' ? 'bookings' : k)));
     const pane = $('#pane');
-    if (!(k === 'bookings' || k === 'booking') || !$('#blist')) pane.dataset.view = '';
+    const stay = (k === 'bookings' || k === 'booking') && $('#blist');
+    if (!stay) { pane.dataset.view = ''; dropLive(); }
     if (k !== 'booking') closeDrawerQuiet();
-    const views = { dashboard, bookings, booking: (p, id) => { bookings(p); openBooking(+id); }, checkin, venues, passes, faqs, settings };
+    const views = { dashboard, bookings, booking: (p, id) => { bookings(p); openBooking(id); }, checkin, venues, passes, faqs, settings };
     (views[k] || dashboard)(pane, arg && decodeURIComponent(arg));
   }
 
@@ -101,22 +115,30 @@
   const fail = (pane, e) => { pane.insertAdjacentHTML('beforeend', `<div class="notice bad">${esc(e.message)}</div>`); };
 
   async function getVenues() {
-    venuesCache = await A('/venues');
+    venuesCache = await Q(F.venues);
     return venuesCache;
   }
 
   /* ================= dashboard ================= */
-  async function dashboard(pane) {
+  function dashboard(pane) {
     pane.innerHTML = head('Dashboard', 'Everything at a glance') + '<p class="muted">Loading…</p>';
-    let s;
-    try { s = await A('/stats'); } catch (e) { return fail(pane, e); }
+    live(F.stats, {}, (s) => drawDashboard(pane, s));
+  }
+  function drawDashboard(pane, s) {
+    if (s.empty) {
+      pane.innerHTML = head('Welcome 🙏', 'Your database is empty') + `<div class="panel2"><div class="pad" style="display:grid;gap:12px;justify-items:start">
+        <p>Start by adding a venue and its passes, or load the sample data (2 venues, 9 nights, FAQs) and edit it.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="sample" type="button">Load sample data</button><a class="btn ghost sm" href="#venues">Add a venue</a></div></div></div>`;
+      $('#sample').onclick = async (e) => { busy(e.target, true, 'Loading…'); try { await M(F.loadSampleData); toast('Sample data loaded', 'ok'); } catch (x) { busy(e.target, false); toast(x.message, 'bad'); } };
+      return;
+    }
     const st = (k) => s.byStatus.find((x) => x.status === k) || { n: 0, amount: 0 };
     const soldQty = s.inventory.reduce((a, i) => a + i.confirmed, 0);
     const heldQty = s.inventory.reduce((a, i) => a + i.held, 0);
     const byVenue = new Map();
     for (const i of s.inventory) { if (!byVenue.has(i.venue)) byVenue.set(i.venue, []); byVenue.get(i.venue).push(i); }
     const def = me.default_password ? `<div class="notice bad" style="margin-bottom:16px">⚠ You are still using the default admin password. <a href="#settings">Change it now</a>.</div>` : '';
-    pane.innerHTML = head('Dashboard', `Today is ${esc(dateShort(s.today))}`, '<a class="btn sm" href="#bookings">Open verification queue</a>') + def + `
+    pane.innerHTML = head('Dashboard', `Today is ${esc(dateShort(s.today))} · updates live`, '<a class="btn sm" href="#bookings">Open verification queue</a>') + def + `
       <div class="tiles">
         <a class="tile hot" href="#bookings"><span>Waiting for verification</span><b>${st('pending').n}</b><small>${inr(st('pending').amount)} to check</small></a>
         <div class="tile"><span>Confirmed revenue</span><b>${inr(st('confirmed').amount)}</b><small>${st('confirmed').n} bookings</small></div>
@@ -136,7 +158,7 @@
   }
 
   /* ================= bookings ================= */
-  const bstate = { status: 'pending', venue: '', date: '', q: '', page: 1 };
+  const bstate = { status: 'pending', venue: '', date: '', q: '', limit: 50 };
   let lastRows = [];
   async function bookings(pane) {
     if (pane.dataset.view === 'bookings') return loadBookings();
@@ -153,27 +175,32 @@
       </div>
       <div class="panel2" id="blist"><div class="empty-state">Loading…</div></div>`;
     $('#bv').value = bstate.venue;
-    $('#btabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; bstate.status = b.dataset.s; bstate.page = 1; $$('#btabs button').forEach((x) => x.classList.toggle('on', x === b)); loadBookings(); };
+    $('#btabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; bstate.status = b.dataset.s; bstate.limit = 50; $$('#btabs button').forEach((x) => x.classList.toggle('on', x === b)); loadBookings(); };
     let tq;
-    $('#bq').oninput = (e) => { clearTimeout(tq); tq = setTimeout(() => { bstate.q = e.target.value.trim(); bstate.page = 1; loadBookings(); }, 250); };
-    $('#bv').onchange = (e) => { bstate.venue = e.target.value; bstate.page = 1; loadBookings(); };
-    $('#bd').onchange = (e) => { bstate.date = e.target.value; bstate.page = 1; loadBookings(); };
-    $('#csvBtn').onclick = () => { location.href = '/api/admin/bookings.csv?' + qs(); };
+    $('#bq').oninput = (e) => { clearTimeout(tq); tq = setTimeout(() => { bstate.q = e.target.value.trim(); bstate.limit = 50; loadBookings(); }, 250); };
+    $('#bv').onchange = (e) => { bstate.venue = e.target.value; bstate.limit = 50; loadBookings(); };
+    $('#bd').onchange = (e) => { bstate.date = e.target.value; bstate.limit = 50; loadBookings(); };
+    $('#csvBtn').onclick = (e) => exportCsv(e.target);
     $('#newBk').onclick = counterBooking;
     loadBookings();
   }
-  const qs = () => new URLSearchParams(Object.entries(bstate).filter(([, v]) => v !== '' && v != null)).toString();
-
-  async function loadBookings() {
+  let listUnsub = null;
+  function loadBookings() {
     const box = $('#blist');
     if (!box) return;
-    let res;
-    try { res = await A('/bookings?' + qs()); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
-    lastRows = res.rows;
-    if (!res.rows.length) { box.innerHTML = `<div class="empty-state">${bstate.status === 'pending' ? 'No payments waiting for verification. 🪔' : 'No bookings match.'}</div>`; return; }
-    const pages = Math.ceil(res.total / res.limit);
+    if (listUnsub) listUnsub();
+    const args = {
+      token, status: bstate.status || undefined, venueId: bstate.venue || undefined, date: bstate.date || undefined,
+      q: bstate.q || undefined, paginationOpts: { numItems: bstate.limit, cursor: null },
+    };
+    listUnsub = watch(F.listBookings, args, (res) => drawBookings(box, res), (e) => { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; });
+    subs.push(() => { if (listUnsub) listUnsub(); listUnsub = null; });
+  }
+  function drawBookings(box, res) {
+    lastRows = res.page;
+    if (!res.page.length && res.isDone) { box.innerHTML = `<div class="empty-state">${bstate.status === 'pending' ? 'No payments waiting for verification. 🪔' : 'No bookings match.'}</div>`; return; }
     box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Guest</th><th>Passes</th><th class="num">Amount</th><th>UTR</th><th>Status</th><th>${bstate.status === 'pending' ? 'Paid' : 'Created'}</th></tr></thead><tbody>
-      ${res.rows.map((b) => `<tr class="click" data-id="${b.id}">
+      ${res.page.map((b) => `<tr class="click" data-id="${b.id}">
         <td class="mono">${esc(b.code)}${b.source === 'counter' ? ' <span class="pill mute">counter</span>' : ''}</td>
         <td>${esc(b.name)}<div class="muted sm">${esc(b.phone)}</div></td>
         <td class="sm">${b.items.map((i) => `${i.qty}× ${esc(i.pass_label)} <span class="muted">${esc(dateShort(i.pass_date))}</span>`).join('<br>')}</td>
@@ -182,11 +209,51 @@
         <td>${statusPill(b.status)}${b.checked_in_at ? ' <span class="pill ok">in</span>' : ''}</td>
         <td class="muted sm">${esc(when(bstate.status === 'pending' ? b.paid_at : b.created_at))}</td></tr>`).join('')}
       </tbody></table></div>
-      <div class="pager"><span>${res.total} booking${res.total === 1 ? '' : 's'}</span><span>
-        <button class="iconbtn" ${res.page <= 1 ? 'disabled' : ''} data-pg="-1">← Prev</button> Page ${res.page} / ${pages}
-        <button class="iconbtn" ${res.page >= pages ? 'disabled' : ''} data-pg="1">Next →</button></span></div>`;
-    box.querySelectorAll('tr[data-id]').forEach((tr) => tr.onclick = () => openBooking(+tr.dataset.id));
-    box.querySelectorAll('[data-pg]').forEach((b) => b.onclick = () => { bstate.page += +b.dataset.pg; loadBookings(); });
+      <div class="pager"><span>${res.page.length} shown · updates live</span><span>
+        ${res.isDone ? '' : '<button class="iconbtn" data-more="1">Load more</button>'}</span></div>`;
+    box.querySelectorAll('tr[data-id]').forEach((tr) => tr.onclick = () => openBooking(tr.dataset.id));
+    const more = box.querySelector('[data-more]');
+    if (more) more.onclick = () => { bstate.limit += 50; loadBookings(); };
+  }
+
+  /* CSV of every booking matching the current filters, built in the browser */
+  async function exportCsv(btn) {
+    busy(btn, true, 'Exporting…');
+    try {
+      const all = [];
+      let cursor = null;
+      for (;;) {
+        const r = await Q(F.exportPage, { paginationOpts: { numItems: 500, cursor } });
+        all.push(...r.page);
+        if (r.isDone) break;
+        cursor = r.continueCursor;
+      }
+      const qq = bstate.q.toLowerCase();
+      const rows = all.filter((b) => (!bstate.status || b.status === bstate.status)
+        && (!bstate.venue || b.items.some((i) => i.venue_id === bstate.venue))
+        && (!bstate.date || b.items.some((i) => i.pass_date === bstate.date))
+        && (!qq || [b.code, b.name, b.phone, b.utr, b.email].join(' ').toLowerCase().includes(qq)));
+      const cell = (v) => {
+        const t = v == null ? '' : String(v);
+        const safe = /^[=+\-@\t\r]/.test(t) ? "'" + t : t; // no spreadsheet formulas
+        return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+      };
+      const iso = (ts) => (ts ? new Date(ts).toISOString() : '');
+      const head = ['code', 'status', 'name', 'phone', 'email', 'amount', 'utr', 'passes', 'admits', 'source', 'created_at', 'paid_at', 'verified_at', 'last_checkin_at', 'admin_note', 'customer_note'];
+      const lines = [head.join(',')].concat(rows.map((b) => [
+        b.code, b.status, b.name, b.phone, b.email, b.amount, b.utr,
+        b.items.map((i) => `${i.qty}x ${i.venue_name} / ${i.pass_label} / ${i.pass_date || 'Season'}`).join('; '),
+        b.items.reduce((s2, i) => s2 + i.qty * i.admits, 0), b.source,
+        iso(b.created_at), iso(b.paid_at), iso(b.verified_at), iso(b.checked_in_at), b.admin_note, b.customer_note,
+      ].map(cell).join(',')));
+      const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = Object.assign(document.createElement('a'), { href: url, download: `mavladi-bookings-${new Date().toISOString().slice(0, 10)}.csv` });
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+      toast(`${rows.length} bookings exported`, 'ok');
+    } catch (e) { toast(e.message, 'bad'); }
+    busy(btn, false);
   }
 
   /* ---------------- booking drawer ---------------- */
@@ -222,9 +289,11 @@
     drawer.classList.add('on'); scrim.classList.add('on'); drawer.setAttribute('aria-hidden', 'false');
     drawer.innerHTML = '<div class="db"><p class="muted">Loading…</p></div>';
     let b;
-    try { b = await A('/bookings/' + id); } catch (e) { drawer.innerHTML = `<div class="db"><div class="notice bad">${esc(e.message)}</div></div>`; return; }
+    try { b = await Q(F.getBooking, { id }); } catch (e) { drawer.innerHTML = `<div class="db"><div class="notice bad">${esc(e.message)}</div></div>`; return; }
+    if (!b) { drawer.innerHTML = '<div class="db"><div class="notice bad">That booking no longer exists.</div></div>'; return; }
     current = b;
-    const shot = b.screenshot ? `/api/admin/screenshots/${encodeURIComponent(b.screenshot)}` : null;
+    b.ticket_url = `${location.origin}/ticket?code=${encodeURIComponent(b.code)}&t=${encodeURIComponent(b.secret)}`;
+    const shot = b.screenshot_url;
     const admits = b.items.reduce((s, i) => s + i.qty * i.admits, 0);
     const waMsg = b.status === 'confirmed'
       ? `Jay Mataji ${b.name.split(' ')[0]}! 🙏 Your Mavladi Mandli booking ${b.code} is CONFIRMED. Your e-pass (show the QR at the gate): ${b.ticket_url}`
@@ -287,7 +356,7 @@
     $('#cpLink').onclick = () => navigator.clipboard.writeText(b.ticket_url).then(() => toast('Ticket link copied'));
     $('#delB').onclick = async () => {
       if (!confirm(`Delete booking ${b.code} permanently? This frees its passes and cannot be undone.`)) return;
-      try { await A('/bookings/' + b.id, { method: 'DELETE' }); toast('Deleted'); closeDrawer(); loadBookings(); refreshBadge(); } catch (e) { toast(e.message, 'bad'); }
+      try { await M(F.deleteBooking, { id: b.id }); toast('Deleted'); closeDrawer(); } catch (e) { toast(e.message, 'bad'); }
     };
     $('#editG').onclick = () => formModal({
       title: `Edit guest · ${b.code}`,
@@ -298,7 +367,7 @@
         { name: 'utr', label: 'UTR', full: true },
       ],
       values: b,
-      submit: async (v) => { await A('/bookings/' + b.id, { method: 'PATCH', body: v }); toast('Saved', 'ok'); openBooking(b.id); loadBookings(); },
+      submit: async (v) => { await M(F.updateBooking, { id: b.id, ...v }); toast('Saved', 'ok'); openBooking(b.id); },
     });
     const img = $('#shotImg');
     if (img) img.onclick = () => window.open(img.src, '_blank');
@@ -316,15 +385,16 @@
     if (action === 'cancel' && !confirm('Cancel this booking and release its passes?')) return;
     if (btn) busy(btn, true, '…');
     try {
-      const b = await A(`/bookings/${current.id}/action`, { method: 'POST', body: { action, note, force } });
+      const id = current.id;
+      await M(F.bookingAction, { id, action, note: note || undefined, force: force || undefined });
+      const b = { id };
       const msgs = { confirm: 'Confirmed ✓ — pass is live', reject: 'Rejected', reupload: 'Guest asked to re-upload', cancel: 'Cancelled', reopen: 'Back in the queue', checkin: 'Checked in ✓', undo_checkin: 'Check-in undone' };
       toast(msgs[action] || 'Done', action === 'reject' || action === 'cancel' ? '' : 'ok');
-      refreshBadge();
-      // in the queue, move straight on to the next one
+      // in the queue, move straight on to the next one (the live list drops this one)
       const i = lastRows.findIndex((r) => r.id === b.id);
-      await loadBookings();
       if (bstate.status === 'pending' && ['confirm', 'reject', 'reupload'].includes(action)) {
-        const next = lastRows[Math.min(i, lastRows.length - 1)];
+        const rest = lastRows.filter((r) => r.id !== b.id);
+        const next = rest[Math.min(i, rest.length - 1)];
         if (next) return openBooking(next.id);
         closeDrawer();
         return;
@@ -332,13 +402,13 @@
       openBooking(b.id);
     } catch (e) {
       if (btn) busy(btn, false);
-      if (e.status === 422 && action === 'checkin' && confirm(e.message + '\n\nAdmit anyway?')) return act(action, null, true);
+      if (e.code === 'WRONG_NIGHT' && action === 'checkin' && confirm(e.message + '\n\nAdmit anyway?')) return act(action, null, true);
       toast(e.message, 'bad');
     }
   }
 
   function counterBooking() {
-    A('/passes').then((ps) => {
+    Q(F.passes).then((ps) => {
       const opts = ps.filter((p) => p.active).map((p) => ({ v: p.id, l: `${p.venue_name} · ${dateShort(p.date)} · ${p.label} · ${inr(p.price)} (${p.quantity - p.held} left)` }));
       formModal({
         title: 'Counter / manual booking',
@@ -354,9 +424,11 @@
         ],
         values: { qty: 1, status: 'confirmed' },
         submit: async (v) => {
-          const b = await A('/bookings', { method: 'POST', body: { ...v, items: [{ passId: +v.pass, qty: +v.qty }] } });
+          const b = await M(F.counterBooking, {
+            name: v.name, phone: v.phone, note: v.note || undefined, utr: v.utr || undefined, status: v.status,
+            items: [{ passId: v.pass, qty: Number(v.qty) }], secret: secret(),
+          });
           toast(`Booking ${b.code} created`, 'ok');
-          loadBookings();
           openBooking(b.id);
         },
       });
@@ -405,7 +477,8 @@
     if (!code) return;
     box.innerHTML = '<p class="muted">Checking…</p>';
     let b;
-    try { b = await A('/checkin/' + encodeURIComponent(code)); } catch (e) { box.innerHTML = `<div class="verdict bad"><h2>✕ Not found</h2><p>${esc(e.message)}</p></div>`; return; }
+    try { b = await Q(F.checkinLookup, { code }); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
+    if (!b) { box.innerHTML = '<div class="verdict bad"><h2>✕ Not found</h2><p>No booking with that code.</p></div>'; return; }
     const admits = b.items.reduce((s, i) => s + i.qty * i.admits, 0);
     const tonight = b.checkins.find((c) => c.night === b.night);
     const validTonight = b.items.some((i) => i.pass_date == null || i.pass_date === b.night);
@@ -421,7 +494,7 @@
     if (ab) ab.onclick = async () => {
       busy(ab, true, 'Admitting…');
       try {
-        await A(`/bookings/${b.id}/action`, { method: 'POST', body: { action: 'checkin', force: !!ab.dataset.force } });
+        await M(F.bookingAction, { id: b.id, action: 'checkin', force: !!ab.dataset.force || undefined });
         toast(`${b.name} admitted ✓`, 'ok');
         lookupGate(code);
         const f = $('#gform'); f.code.value = ''; f.code.focus();
@@ -440,18 +513,18 @@
     $('#vbox').innerHTML = vs.length ? vs.map((v) => `<article class="vcard">
       ${v.image ? `<img src="${esc(v.image)}" alt="">` : '<img alt="">'}
       <div class="b"><h3>${esc(v.name)} ${v.active ? '' : '<span class="pill mute">hidden</span>'}</h3>
-        <p class="muted sm">${esc([v.name_gu, v.city, v.start_time].filter(Boolean).join(' · '))}</p>
+        <p class="muted sm">${esc([v.nameGu, v.city, v.startTime].filter(Boolean).join(' · '))}</p>
         <p class="sm">${v.pass_count} pass line${v.pass_count === 1 ? '' : 's'}</p>
         <div class="a"><button class="iconbtn" data-e="${v.id}">Edit</button><a class="iconbtn" href="#passes" data-p="${v.id}">Passes</a><button class="iconbtn danger" data-d="${v.id}">Delete</button></div></div></article>`).join('')
       : '<div class="empty-state">No venues yet. Add your first ground.</div>';
     $('#vbox').onclick = async (e) => {
       const t = e.target;
-      if (t.dataset.e) venueForm(vs.find((v) => v.id === +t.dataset.e));
+      if (t.dataset.e) venueForm(vs.find((v) => v.id === t.dataset.e));
       if (t.dataset.p) pstate.venue = t.dataset.p;
       if (t.dataset.d) {
-        const v = vs.find((x) => x.id === +t.dataset.d);
+        const v = vs.find((x) => x.id === t.dataset.d);
         if (!confirm(`Delete “${v.name}” and all its passes?`)) return;
-        try { await A('/venues/' + v.id, { method: 'DELETE' }); toast('Venue deleted'); venues(pane); } catch (ex) { toast(ex.message, 'bad'); }
+        try { await M(F.deleteVenue, { id: v.id }); toast('Venue deleted'); venues(pane); } catch (ex) { toast(ex.message, 'bad'); }
       }
     };
   }
@@ -460,17 +533,17 @@
       title: v ? 'Edit venue' : 'Add venue',
       fields: [
         { name: 'name', label: 'Name', required: true, full: true },
-        { name: 'name_gu', label: 'Name in Gujarati' }, { name: 'city', label: 'City' },
+        { name: 'nameGu', label: 'Name in Gujarati' }, { name: 'city', label: 'City' },
         { name: 'address', label: 'Address', full: true },
-        { name: 'map_url', label: 'Google Maps link', full: true, placeholder: 'https://maps.app.goo.gl/…' },
-        { name: 'start_time', label: 'Timing', placeholder: '8:30 pm onwards' }, { name: 'sort', label: 'Order', type: 'number' },
+        { name: 'mapUrl', label: 'Google Maps link', full: true, placeholder: 'https://maps.app.goo.gl/…' },
+        { name: 'startTime', label: 'Timing', placeholder: '8:30 pm onwards' }, { name: 'sort', label: 'Order', type: 'number' },
         { name: 'description', label: 'Short description', type: 'textarea', full: true },
         { name: 'image', label: 'Photo', type: 'image', full: true },
         { name: 'active', label: 'Show on the website', type: 'switch', full: true },
       ],
-      values: v || { active: 1, sort: 0 },
+      values: v || { active: true, sort: 0 },
       submit: async (val) => {
-        await A(v ? '/venues/' + v.id : '/venues', { method: v ? 'PUT' : 'POST', body: val });
+        await M(F.saveVenue, { ...(v ? { id: v.id } : {}), ...val });
         toast('Venue saved', 'ok');
         venues($('#pane'));
       },
@@ -499,38 +572,43 @@
   let passCache = [];
   async function loadPasses() {
     const box = $('#pbox');
-    try { passCache = await A('/passes?venue=' + pstate.venue); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
+    try { passCache = await Q(F.passes, { venueId: pstate.venue }); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
     if (!passCache.length) { box.innerHTML = '<div class="empty-state">No passes for this venue yet. Use “Add many nights” to create all nine at once.</div>'; return; }
     box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Night</th><th>Pass</th><th class="num">Price</th><th class="num">Qty</th><th class="num">Held</th><th class="num">Left</th><th class="num">Max/booking</th><th>On sale</th><th></th></tr></thead><tbody>
       ${passCache.map((p) => `<tr class="${p.active ? '' : 'inactive'}"><td>${esc(dateShort(p.date))}</td><td>${esc(p.label)}${p.admits > 1 ? ` <span class="muted sm">admits ${p.admits}</span>` : ''}${p.description ? `<div class="muted sm">${esc(p.description)}</div>` : ''}</td>
-        <td class="num">${inr(p.price)}</td><td class="num">${p.quantity}</td><td class="num">${p.held}</td><td class="num">${p.quantity - p.held}</td><td class="num">${p.max_per_booking}</td>
+        <td class="num">${inr(p.price)}</td><td class="num">${p.quantity}</td><td class="num">${p.held}</td><td class="num">${p.quantity - p.held}</td><td class="num">${p.maxPerBooking}</td>
         <td><label class="switch"><input type="checkbox" data-t="${p.id}" ${p.active ? 'checked' : ''} aria-label="On sale"></label></td>
         <td class="num"><button class="iconbtn" data-e="${p.id}">Edit</button> <button class="iconbtn danger" data-d="${p.id}">Delete</button></td></tr>`).join('')}
     </tbody></table></div>`;
     box.onclick = async (e) => {
       const t = e.target;
-      if (t.dataset.e) passForm(passCache.find((p) => p.id === +t.dataset.e));
+      if (t.dataset.e) passForm(passCache.find((p) => p.id === t.dataset.e));
       if (t.dataset.d) {
         if (!confirm('Delete this pass line?')) return;
-        try { await A('/passes/' + t.dataset.d, { method: 'DELETE' }); toast('Deleted'); loadPasses(); } catch (ex) { toast(ex.message, 'bad'); }
+        try { await M(F.deletePass, { id: t.dataset.d }); toast('Deleted'); loadPasses(); } catch (ex) { toast(ex.message, 'bad'); }
       }
     };
     box.onchange = async (e) => {
       const t = e.target;
       if (!t.dataset.t) return;
-      const p = passCache.find((x) => x.id === +t.dataset.t);
-      try { await A('/passes/' + p.id, { method: 'PUT', body: { ...p, active: t.checked ? 1 : 0 } }); toast(t.checked ? 'On sale' : 'Taken off sale'); loadPasses(); }
+      const p = passCache.find((x) => x.id === t.dataset.t);
+      try { await M(F.savePass, { ...passArgs(p), id: p.id, active: t.checked }); toast(t.checked ? 'On sale' : 'Taken off sale'); loadPasses(); }
       catch (ex) { toast(ex.message, 'bad'); t.checked = !t.checked; }
     };
   }
+  const passArgs = (p) => ({
+    venueId: p.venueId, date: p.date || null, label: p.label, description: p.description || undefined,
+    price: Number(p.price) || 0, quantity: Number(p.quantity) || 0, maxPerBooking: Number(p.maxPerBooking) || 10,
+    admits: Number(p.admits) || 1, active: !!p.active, sort: Number(p.sort) || 0,
+  });
   const passFields = (withDate) => [
-    { name: 'venue_id', label: 'Venue', type: 'select', options: venuesCache.map((v) => ({ v: v.id, l: v.name })), required: true, full: true },
+    { name: 'venueId', label: 'Venue', type: 'select', options: venuesCache.map((v) => ({ v: v.id, l: v.name })), required: true, full: true },
     ...(withDate ? [{ name: 'date', label: 'Date (empty = season pass)', type: 'date' }] : []),
     { name: 'label', label: 'Pass name', required: true, placeholder: 'Daily Pass / Couple Pass / Kids' },
     { name: 'price', label: 'Price (₹)', type: 'number', min: 0, required: true },
     { name: 'quantity', label: 'Quantity available', type: 'number', min: 0, required: true },
     { name: 'admits', label: 'People per pass', type: 'number', min: 1 },
-    { name: 'max_per_booking', label: 'Max per booking', type: 'number', min: 1 },
+    { name: 'maxPerBooking', label: 'Max per booking', type: 'number', min: 1 },
     { name: 'description', label: 'Note shown to guests', full: true },
     { name: 'sort', label: 'Order', type: 'number' },
     { name: 'active', label: 'On sale', type: 'switch' },
@@ -539,9 +617,9 @@
     formModal({
       title: p ? 'Edit pass' : 'Add pass',
       fields: passFields(true),
-      values: p || { venue_id: pstate.venue, label: 'Daily Pass', admits: 1, max_per_booking: 10, active: 1, sort: 0 },
+      values: p || { venueId: pstate.venue, label: 'Daily Pass', admits: 1, maxPerBooking: 10, active: true, sort: 0 },
       submit: async (v) => {
-        await A(p ? '/passes/' + p.id : '/passes', { method: p ? 'PUT' : 'POST', body: v });
+        await M(F.savePass, { ...(p ? { id: p.id } : {}), ...passArgs(v) });
         toast('Pass saved', 'ok'); loadPasses();
       },
     });
@@ -551,10 +629,11 @@
       title: 'Add a pass for many nights',
       intro: 'Creates one pass line per night in the range — e.g. a Daily Pass for all nine nights.',
       fields: [{ name: 'from', label: 'First night', type: 'date', required: true }, { name: 'to', label: 'Last night', type: 'date', required: true }, ...passFields(false)],
-      values: { venue_id: pstate.venue, from: '2026-10-11', to: '2026-10-19', label: 'Daily Pass', admits: 1, max_per_booking: 10, active: 1, sort: 0 },
+      values: { venueId: pstate.venue, from: '2026-10-11', to: '2026-10-19', label: 'Daily Pass', admits: 1, maxPerBooking: 10, active: true, sort: 0 },
       submit: async (v) => {
-        const r = await A('/passes/bulk', { method: 'POST', body: v });
-        toast(`${r.created} nights added`, 'ok'); loadPasses();
+        const { date, ...rest } = passArgs(v);
+        const n = await M(F.bulkPasses, { ...rest, from: v.from, to: v.to });
+        toast(`${n} nights added`, 'ok'); loadPasses();
       },
     });
   }
@@ -565,21 +644,21 @@
     pane.innerHTML = head('FAQs', 'Shown on the home page', '<button class="btn sm" id="addF" type="button">+ Add question</button>') + '<div class="panel2" id="fbox"></div>';
     $('#addF').onclick = () => faqForm();
     let fs;
-    try { fs = await A('/faqs'); } catch (e) { return fail(pane, e); }
+    try { fs = await Q(F.faqs); } catch (e) { return fail(pane, e); }
     $('#fbox').innerHTML = fs.length ? `<div class="tbl-wrap"><table class="tbl"><tbody>${fs.map((f) => `<tr class="${f.active ? '' : 'inactive'}"><td style="width:50px" class="muted">${f.sort}</td><td><b>${esc(f.question)}</b><div class="muted sm">${esc(f.answer)}</div></td>
       <td class="num"><button class="iconbtn" data-e="${f.id}">Edit</button> <button class="iconbtn danger" data-d="${f.id}">Delete</button></td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">No questions yet.</div>';
     $('#fbox').onclick = async (e) => {
       const t = e.target;
-      if (t.dataset.e) faqForm(fs.find((f) => f.id === +t.dataset.e));
-      if (t.dataset.d && confirm('Delete this question?')) { await A('/faqs/' + t.dataset.d, { method: 'DELETE' }).catch((x) => toast(x.message, 'bad')); faqs(pane); }
+      if (t.dataset.e) faqForm(fs.find((f) => f.id === t.dataset.e));
+      if (t.dataset.d && confirm('Delete this question?')) { await M(F.deleteFaq, { id: t.dataset.d }).catch((x) => toast(x.message, 'bad')); faqs(pane); }
     };
   }
   function faqForm(f) {
     formModal({
       title: f ? 'Edit question' : 'Add question',
       fields: [{ name: 'question', label: 'Question', required: true, full: true }, { name: 'answer', label: 'Answer', type: 'textarea', required: true, full: true }, { name: 'sort', label: 'Order', type: 'number' }, { name: 'active', label: 'Show', type: 'switch' }],
-      values: f || { active: 1, sort: 10 },
-      submit: async (v) => { await A(f ? '/faqs/' + f.id : '/faqs', { method: f ? 'PUT' : 'POST', body: v }); toast('Saved', 'ok'); faqs($('#pane')); },
+      values: f || { active: true, sort: 10 },
+      submit: async (v) => { await M(F.saveFaq, { ...(f ? { id: f.id } : {}), question: v.question, answer: v.answer, sort: Number(v.sort) || 0, active: !!v.active }); toast('Saved', 'ok'); faqs($('#pane')); },
     });
   }
 
@@ -587,7 +666,7 @@
   async function settings(pane) {
     pane.dataset.view = 'settings';
     let s;
-    try { s = await A('/settings'); } catch (e) { return fail(pane, e); }
+    try { s = await Q(F.settings); } catch (e) { return fail(pane, e); }
     const groups = [
       ['Payment (UPI)', [
         { name: 'upi_id', label: 'UPI ID', required: true, placeholder: 'yourname@okhdfcbank', help: 'Money goes here. Double-check it!' },
@@ -622,14 +701,16 @@
       e.preventDefault();
       const btn = e.submitter || e.target.querySelector('[type=submit]');
       busy(btn, true, 'Saving…');
-      try { await A('/settings', { method: 'PUT', body: readForm(e.target, groups.flatMap((g) => g[1])) }); toast('Settings saved', 'ok'); }
+      const vals = readForm(e.target, groups.flatMap((g) => g[1]));
+      const values = Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v)]));
+      try { await M(F.saveSettings, { values }); toast('Settings saved', 'ok'); }
       catch (ex) { toast(ex.message, 'bad'); }
       busy(btn, false);
     };
     $('#pwform').onsubmit = async (e) => {
       e.preventDefault();
       try {
-        await A('/password', { method: 'POST', body: { current: e.target.current.value, next: e.target.next.value } });
+        await authed(a(fns.auth.changePassword, { token, current: e.target.current.value, next: e.target.next.value }));
         me.default_password = false; toast('Password changed', 'ok'); e.target.reset();
       } catch (ex) { toast(ex.message, 'bad'); }
     };
@@ -642,6 +723,7 @@
     const req = f.required ? 'required' : '';
     const help = f.help ? `<small>${esc(f.help)}</small>` : '';
     if (f.type === 'switch') return `<label class="switch ${f.full ? 'full' : ''}"><input type="checkbox" name="${f.name}" ${String(v) === '1' || v === true ? 'checked' : ''}> ${esc(f.label)}</label>`;
+    if (f.type === 'date' && v === null) return fieldHtml(f, '');
     if (f.type === 'textarea') return `<label class="${cls}"><span>${esc(f.label)}</span><textarea name="${f.name}" rows="3" ${req}>${esc(v)}</textarea>${help}</label>`;
     if (f.type === 'select') return `<label class="${cls}"><span>${esc(f.label)}</span><select name="${f.name}" ${req}>${f.options.map((o) => `<option value="${esc(o.v)}" ${String(o.v) === String(v) ? 'selected' : ''}>${esc(o.l)}</option>`).join('')}</select>${help}</label>`;
     if (f.type === 'image') return `<div class="${cls}"><span>${esc(f.label)}</span><div class="imgfield"><img alt="" src="${esc(v)}" ${v ? '' : 'hidden'}>
@@ -653,9 +735,10 @@
     root.querySelectorAll('[data-up]').forEach((inp) => inp.addEventListener('change', async () => {
       const f = inp.files[0];
       if (!f) return;
-      const fd = new FormData(); fd.append('file', f);
+      if (!/^image\//.test(f.type)) { toast('Please choose an image', 'bad'); return; }
       try {
-        const r = await A('/upload', { method: 'POST', body: fd });
+        const storageId = await upload(await M(F.uploadUrl), f);
+        const r = { url: await M(F.fileUrl, { storageId }) };
         const wrap = inp.closest('.imgfield');
         wrap.querySelector('input[type=hidden]').value = r.url;
         const img = wrap.querySelector('img'); img.src = r.url; img.hidden = false;
@@ -673,7 +756,7 @@
     for (const f of fields) {
       const el = form.elements[f.name];
       if (!el) continue;
-      out[f.name] = f.type === 'switch' ? (el.checked ? 1 : 0) : el.value.trim();
+      out[f.name] = f.type === 'switch' ? el.checked : f.type === 'number' ? Number(el.value) || 0 : el.value.trim();
     }
     return out;
   }
@@ -703,4 +786,5 @@
     const first = modal.querySelector('.mb input:not([type=hidden]), .mb select, .mb textarea');
     if (first) first.focus();
   }
+  boot();
 })();

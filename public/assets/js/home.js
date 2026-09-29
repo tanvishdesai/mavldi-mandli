@@ -9,7 +9,7 @@
 (function () {
   'use strict';
 
-  const { api, esc, inr, dateParts, NAVDURGA } = window.MV;
+  const { q, fns, esc, inr, dateParts, NAVDURGA } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -22,8 +22,8 @@
   async function loadContent() {
     const [cfg, cat, faqs] = await Promise.all([
       window.MV.config().catch(() => null),
-      api('/api/venues').catch(() => null),
-      api('/api/faqs').catch(() => []),
+      q(fns.public.catalogue).catch(() => null),
+      q(fns.public.faqs).catch(() => []),
     ]);
     if (cfg) {
       document.querySelectorAll('[data-cfg]').forEach((el) => {
@@ -90,7 +90,7 @@
           <div class="avail" aria-hidden="true"><i style="width:${pct}%"></i></div>
           <p class="avail-l">${availLabel}</p>
           <div class="act">
-            <a class="btn sm" href="/book?venue=${v.id}">${bookable.length ? 'Book here' : 'See passes'}</a>
+            <a class="btn sm" href="/book?venue=${encodeURIComponent(v.id)}">${bookable.length ? 'Book here' : 'See passes'}</a>
             ${v.map_url ? `<a class="btn ghost sm" href="${esc(v.map_url)}" target="_blank" rel="noopener">Map</a>` : ''}
           </div>
         </div>

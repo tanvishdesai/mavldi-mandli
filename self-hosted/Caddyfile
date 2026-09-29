@@ -1,0 +1,10 @@
+# Caddy fetches and renews TLS certificates for both names automatically.
+# Point both DNS records (A/AAAA) at this server before starting.
+
+{$CONVEX_API_DOMAIN} {
+	reverse_proxy backend:3210
+}
+
+{$CONVEX_DASHBOARD_DOMAIN} {
+	reverse_proxy dashboard:6791
+}

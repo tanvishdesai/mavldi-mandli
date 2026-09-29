@@ -1,7 +1,7 @@
 node_modules/
-data/
-*.db
-*.db-wal
-*.db-shm
 .env
+.env.local
 .DS_Store
+public/vendor/
+public/env.js
+.vercel

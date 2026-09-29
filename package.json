@@ -2,22 +2,31 @@
   "name": "mavladi-mandli",
   "version": "1.0.0",
   "private": true,
-  "description": "Mavladi Mandli — Navratri garba pass booking with UPI payment and manual verification",
-  "main": "server/index.js",
+  "description": "Mavladi Mandli \u2014 garba pass booking on Convex + static frontend",
   "scripts": {
-    "start": "node server/index.js",
-    "dev": "node --watch server/index.js",
-    "seed": "node server/seed.js",
-    "test": "node --test test/*.test.js"
+    "dev": "convex dev",
+    "build": "node scripts/build.mjs",
+    "vercel-build": "node scripts/vercel-build.mjs",
+    "deploy": "convex deploy --cmd-url-env-var-name CONVEX_URL --cmd \"node scripts/build.mjs\"",
+    "seed": "convex run seed:run",
+    "test": "vitest run",
+    "typecheck": "tsc -p convex/tsconfig.json"
   },
   "engines": {
     "node": ">=18"
   },
   "license": "UNLICENSED",
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
-    "express": "^4.22.3",
-    "multer": "^2.4.0",
-    "qrcode": "^1.5.4"
-  }
+    "convex": "^1.46.0",
+    "convex-helpers": "^0.1.124",
+    "qrcode-generator": "^2.0.4"
+  },
+  "devDependencies": {
+    "@edge-runtime/vm": "^5.0.0",
+    "@types/node": "^26.6.3",
+    "convex-test": "^0.0.60",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  },
+  "type": "module"
 }

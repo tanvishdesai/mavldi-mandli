@@ -2,26 +2,57 @@
 (function (w) {
   'use strict';
 
-  async function api(path, opts = {}) {
-    const init = { method: opts.method || 'GET', headers: { 'X-Requested-With': 'fetch' }, credentials: 'same-origin' };
-    if (opts.body instanceof FormData) init.body = opts.body;
-    else if (opts.body !== undefined) {
-      init.headers['Content-Type'] = 'application/json';
-      init.body = JSON.stringify(opts.body);
+  /* ---------- Convex ---------- */
+  if (!w.convex || !w.CONVEX_URL) {
+    console.error('Convex client or CONVEX_URL missing — run `npm run build`.');
+  }
+  const client = w.convex && w.CONVEX_URL ? new w.convex.ConvexClient(w.CONVEX_URL) : null;
+  const fns = w.convex ? w.convex.anyApi : {};
+
+  /* Turn Convex errors into something a person can read. Our own errors carry
+     { message, code }; anything else is a server fault or a network problem. */
+  function friendly(e) {
+    if (e && e.data && typeof e.data === 'object' && e.data.message) {
+      return Object.assign(new Error(e.data.message), { code: e.data.code, data: e.data });
     }
+    const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
+    console.error(e);
+    return Object.assign(new Error(offline ? 'You seem to be offline. Check your connection and try again.' : 'Something went wrong on our side. Please try again.'), { code: 'SERVER' });
+  }
+  const call = (kind) => async (ref, args = {}) => {
+    if (!client) throw new Error('The site is not connected to its backend yet.');
+    try { return await client[kind](ref, args); } catch (e) { throw friendly(e); }
+  };
+  const q = call('query'), m = call('mutation'), a = call('action');
+  /* live query: cb runs now and on every change; returns an unsubscribe fn */
+  function watch(ref, args, cb, onErr) {
+    if (!client) return () => {};
+    return client.onUpdate(ref, args, cb, (e) => onErr && onErr(friendly(e)));
+  }
+  /* upload a File to Convex storage via a one-time URL; returns the storage id */
+  async function upload(url, file) {
     let res;
     try {
-      res = await fetch(path, init);
-    } catch {
-      throw Object.assign(new Error('You seem to be offline. Check your connection and try again.'), { status: 0 });
-    }
-    const type = res.headers.get('content-type') || '';
-    const data = type.includes('json') ? await res.json().catch(() => ({})) : await res.text();
-    if (!res.ok) {
-      const msg = (data && data.error) || `Request failed (${res.status})`;
-      throw Object.assign(new Error(msg), { status: res.status, data });
-    }
-    return data;
+      res = await fetch(url, { method: 'POST', headers: { 'Content-Type': file.type || 'application/octet-stream' }, body: file });
+    } catch { throw new Error('Upload failed — check your connection and try again.'); }
+    if (!res.ok) throw new Error('Upload failed. Please try again.');
+    return (await res.json()).storageId;
+  }
+  /* an unguessable token made in the browser (booking secret, admin session) */
+  function secret(n = 24) {
+    const b = crypto.getRandomValues(new Uint8Array(n));
+    return btoa(String.fromCharCode(...b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+  /* QR code as an SVG data URI, in the site's ink colour */
+  function qr(text, { dark = '#3a0a0c', light = '#fffaf0', ec = 'M' } = {}) {
+    const code = w.qrcode(0, ec);
+    code.addData(text);
+    code.make();
+    const n = code.getModuleCount(), pad = 2, size = n + pad * 2;
+    let d = '';
+    for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (code.isDark(r, c)) d += `M${c + pad} ${r + pad}h1v1h-1z`;
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" shape-rendering="crispEdges"><rect width="100%" height="100%" fill="${light}"/><path d="${d}" fill="${dark}"/></svg>`;
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
   }
 
   const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -107,7 +138,7 @@
   }
 
   let cfgPromise;
-  const config = () => (cfgPromise ||= api('/api/config'));
+  const config = () => (cfgPromise ||= q(fns.public.config));
 
-  w.MV = { api, esc, inr, dateLong, dateShort, dateParts, when, NAVDURGA, toast, mine, STATUS, statusPill, busy, config };
+  w.MV = { q, m, a, watch, upload, secret, qr, fns, esc, inr, dateLong, dateShort, dateParts, when, NAVDURGA, toast, mine, STATUS, statusPill, busy, config };
 })(window);
