@@ -36,6 +36,8 @@ export function normPhone(v: unknown) {
 export const validPhone = (d: string) => /^[6-9]\d{9}$/.test(d);
 export const validEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
 export const normUtr = (v: unknown) => String(v ?? "").replace(/[\s-]/g, "").toUpperCase();
+/* Settings that end up in an href/src on a public page: no javascript:/data: */
+export const validUrl = (u: string) => /^(https?:\/\/|\/)/i.test(u);
 export const searchText = (b: { code: string; name: string; phone: string; utr?: string; email?: string }) =>
   [b.code, b.name, b.phone, b.utr, b.email].filter(Boolean).join(" ").toLowerCase();
 
@@ -67,7 +69,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
     "Passes are non-transferable and non-refundable once confirmed. Traditional attire is mandatory. Entry is subject to security checks. The management reserves the right of admission.",
 };
 export const PUBLIC_SETTINGS = Object.keys(DEFAULT_SETTINGS);
-export const EDITABLE_SETTINGS = PUBLIC_SETTINGS;
+/* Where the money goes. Changing any of these silently redirects every future
+   payment, so they need the password re-entered (admin.savePaymentSettings)
+   and are refused by the ordinary settings mutation. */
+export const PAYMENT_SETTINGS = ["upi_id", "upi_payee_name", "upi_qr_image"];
+export const EDITABLE_SETTINGS = PUBLIC_SETTINGS.filter((k) => !PAYMENT_SETTINGS.includes(k));
+/* Settings rendered into an href/src attribute by the frontend. */
+export const URL_SETTINGS = ["instagram_url", "youtube_url", "upi_qr_image"];
 
 export async function getSetting(ctx: QueryCtx, key: string) {
   const row = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", key)).unique();
@@ -88,6 +96,58 @@ export async function setSetting(ctx: MutationCtx, key: string, value: string) {
 export async function requireAdmin(ctx: QueryCtx, token: string) {
   const s = token ? await ctx.db.query("sessions").withIndex("by_token", (q) => q.eq("token", token)).unique() : null;
   if (!s || s.expiresAt < Date.now()) fail("Please sign in again.", "UNAUTHENTICATED");
+}
+
+/* ---------- rate limiting ----------
+   One `attempts` row per bucket key. Keys are always sharded by phone / code /
+   booking so no single row becomes a write hotspot under load; expired rows are
+   cleared by the sweep cron. Convex gives us no client IP in a mutation, so the
+   buckets key on the identifiers an attacker has to supply.
+   ponytail: per-identifier buckets, move to per-IP via an httpAction if someone
+   starts rotating phone numbers faster than this bounds them. */
+export async function rateLimit(ctx: MutationCtx, key: string, max: number, windowMs: number) {
+  const now = Date.now();
+  const row = await ctx.db.query("attempts").withIndex("by_key", (q) => q.eq("key", key)).unique();
+  if (!row || row.resetAt < now) {
+    if (row) await ctx.db.patch(row._id, { count: 1, resetAt: now + windowMs });
+    else await ctx.db.insert("attempts", { key, count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  await ctx.db.patch(row._id, { count: row.count + 1 });
+  return row.count < max;
+}
+/** Rate limit or refuse with a message the guest can read. */
+export async function limit(ctx: MutationCtx, key: string, max: number, windowMs: number, msg: string) {
+  if (!(await rateLimit(ctx, key, max, windowMs))) fail(msg, "RATE_LIMIT");
+}
+
+/* Bounds on abuse that no legitimate guest comes near. */
+export const LIMITS = {
+  bookingsPerPhone: { max: 6, windowMs: 30 * 60_000 },
+  lookupPerPhone: { max: 10, windowMs: 15 * 60_000 },
+  lookupPerCode: { max: 10, windowMs: 15 * 60_000 },
+  uploadPerBooking: { max: 12, windowMs: 60 * 60_000 },
+  /* Unpaid holds may never sit on more than this share of a pass's stock, so a
+     flood of fake holds can delay at most a quarter of the event's sales. */
+  unpaidShareOfStock: 0.25,
+  /* Hard ceiling on simultaneous unpaid holds across the whole event. */
+  maxOpenHolds: 1000,
+};
+
+/* ---------- audit log ---------- */
+export async function audit(
+  ctx: MutationCtx,
+  action: string,
+  d: { subject?: string; before?: string; after?: string; note?: string } = {},
+) {
+  await ctx.db.insert("auditLog", { at: Date.now(), action, ...d });
+}
+
+/** Constant-time string compare, for anything an attacker can guess byte by byte. */
+export function timingSafeEqual(a: string, b: string) {
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
 }
 
 /* ---------- status changes keep every counter honest ---------- */
@@ -132,12 +192,16 @@ export async function applyStatus(
   for (const it of items) {
     const p = await ctx.db.get(it.passId);
     if (!p) continue;
-    let held = p.held, sold = p.sold;
+    let held = p.held, sold = p.sold, unpaid = p.unpaid ?? 0;
     if (wasHeld && !nowHeld) held -= it.qty;
     if (!wasHeld && nowHeld) held += it.qty;
     if (from === "confirmed") sold -= it.qty;
     if (to === "confirmed") sold += it.qty;
-    await ctx.db.patch(p._id, { held: Math.max(0, held), sold: Math.max(0, sold) });
+    if (from === "awaiting_payment") unpaid -= it.qty;
+    if (to === "awaiting_payment") unpaid += it.qty;
+    await ctx.db.patch(p._id, {
+      held: Math.max(0, held), sold: Math.max(0, sold), unpaid: Math.max(0, unpaid),
+    });
   }
   if (from) await bumpCounter(ctx, from, -1, -amount);
   if (to) await bumpCounter(ctx, to, 1, amount);

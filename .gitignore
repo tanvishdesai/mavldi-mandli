@@ -5,3 +5,4 @@ node_modules/
 public/vendor/
 public/env.js
 .vercel
+.env*

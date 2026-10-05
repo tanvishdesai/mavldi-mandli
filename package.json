@@ -17,16 +17,16 @@
   },
   "license": "UNLICENSED",
   "dependencies": {
-    "convex": "^1.46.0",
-    "convex-helpers": "^0.1.124",
-    "qrcode-generator": "^2.0.4"
+    "convex": "1.46.0",
+    "convex-helpers": "0.1.124",
+    "qrcode-generator": "2.0.4"
   },
   "devDependencies": {
-    "@edge-runtime/vm": "^5.0.0",
-    "@types/node": "^26.6.3",
-    "convex-test": "^0.0.60",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.2"
+    "@edge-runtime/vm": "5.0.0",
+    "@types/node": "26.6.3",
+    "convex-test": "0.0.60",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11"
   },
   "type": "module"
 }

@@ -1,10 +1,24 @@
-# Caddy fetches and renews TLS certificates for both names automatically.
-# Point both DNS records (A/AAAA) at this server before starting.
+# Caddy fetches and renews TLS certificates automatically.
+# Point the API DNS record (A/AAAA) at this server before starting.
 
 {$CONVEX_API_DOMAIN} {
 	reverse_proxy backend:3210
 }
 
-{$CONVEX_DASHBOARD_DOMAIN} {
-	reverse_proxy dashboard:6791
-}
+# The Convex dashboard is deliberately NOT published. It is protected by nothing
+# but the admin key, which grants full read/write on every booking, every booking
+# secret and every uploaded screenshot. Reach it through an SSH tunnel instead:
+#
+#   ssh -L 6791:127.0.0.1:6791 you@your-server    # then open http://localhost:6791
+#
+# If you really need it on a domain, uncomment below AND keep both guards: the
+# password (generate a hash with `caddy hash-password`) and the IP allowlist.
+#
+# {$CONVEX_DASHBOARD_DOMAIN} {
+# 	@notallowed not remote_ip 203.0.113.4 198.51.100.0/24
+# 	respond @notallowed 403
+# 	basic_auth {
+# 		admin <paste the output of: caddy hash-password>
+# 	}
+# 	reverse_proxy dashboard:6791
+# }

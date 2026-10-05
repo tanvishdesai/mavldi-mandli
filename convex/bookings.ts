@@ -3,15 +3,25 @@ import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
-  applyStatus, clean, fail, getSetting, normPhone, normUtr, searchText,
+  applyStatus, clean, fail, getSetting, isHolding, LIMITS, limit, normPhone, normUtr, searchText,
   todayIST, validEmail, validPhone, fmtDate, shortfall, type Status,
 } from "./lib";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+/* 8 characters = 32^8 ≈ 1.1e12. The code is what the gate scans, so it wants to
+   be well past guessable; Convex seeds Math.random() with a strong PRNG. */
 function newCode() {
   let s = "MV";
-  for (let i = 0; i < 6; i++) s += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  for (let i = 0; i < 8; i++) s += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
   return s;
+}
+
+/* A UTR identifies exactly one real UPI transaction, so it may back exactly one
+   booking. Without this, one genuine payment screenshot confirms unlimited
+   bookings and the only control is an admin noticing a warning banner. */
+export async function utrOwner(ctx: QueryCtx, utr: string, exceptId?: Id<"bookings">) {
+  const rows = await ctx.db.query("bookings").withIndex("by_utr", (q) => q.eq("utr", utr)).collect();
+  return rows.find((b) => b._id !== exceptId && isHolding(b.status)) ?? null;
 }
 
 export const bookingInput = {
@@ -48,6 +58,16 @@ export async function createBooking(
     if (open.filter((b) => b.status === "awaiting_payment").length >= 3) {
       fail("You already have 3 unpaid bookings. Pay for or cancel one of them first (see My Pass).");
     }
+    // and can't churn through new phone-shaped strings for free either
+    await limit(ctx, `booking:${phone}`, LIMITS.bookingsPerPhone.max, LIMITS.bookingsPerPhone.windowMs,
+      "Too many booking attempts from this number. Please try again in a little while.");
+    /* Ceiling on unpaid holds event-wide. The per-phone caps above are keyed on
+       an attacker-supplied number, so this is the backstop that keeps a script
+       with ten thousand fake numbers from parking the whole catalogue. */
+    const holdsNow = await ctx.db.query("counters").withIndex("by_status", (q) => q.eq("status", "awaiting_payment")).unique();
+    if ((holdsNow?.n ?? 0) >= LIMITS.maxOpenHolds) {
+      fail("A lot of people are paying right now. Please try again in a few minutes.", "BUSY");
+    }
   }
 
   const want = new Map<Id<"passes">, number>();
@@ -71,6 +91,14 @@ export async function createBooking(
     if (!admin && qty > p!.maxPerBooking) fail(`At most ${p!.maxPerBooking} × ${what} per booking.`);
     const available = p!.quantity - p!.held;
     if (qty > available) fail(available > 0 ? `Only ${available} left for ${what}.` : `${what} just sold out.`, "SOLD_OUT");
+    /* Unpaid holds may never cover more than a quarter of a pass. Nobody paying
+       normally notices; a flood of fake holds can delay at most 25% of sales. */
+    if (!admin) {
+      const unpaidCap = Math.max(p!.maxPerBooking, Math.floor(p!.quantity * LIMITS.unpaidShareOfStock));
+      if ((p!.unpaid ?? 0) + qty > unpaidCap) {
+        fail(`${what} has a lot of unpaid holds right now. Please try again in a few minutes.`, "BUSY");
+      }
+    }
     items.push({
       passId: p!._id, venueId: p!.venueId, qty, unitPrice: p!.price, admits: p!.admits,
       venueName: venue?.name ?? "", passLabel: p!.label, passDate: p!.date,
@@ -118,7 +146,7 @@ export const expire = internalMutation({
   },
 });
 
-/* Safety net in case a scheduled job was missed. */
+/* Safety net in case a scheduled job was missed, plus routine tidying. */
 export const sweep = internalMutation({
   args: {},
   handler: async (ctx) => {
@@ -130,6 +158,36 @@ export const sweep = internalMutation({
         await ctx.db.patch(b._id, { status: "expired" });
       }
     }
+    // spent rate-limit buckets: one row per phone/code otherwise accumulates forever
+    for (const a of await ctx.db.query("attempts").take(500)) {
+      if (a.key !== "login" && a.resetAt < now - 3600_000) await ctx.db.delete(a._id);
+    }
+  },
+});
+
+/* Files uploaded through a one-time upload URL but never attached to a booking.
+   Without this, anyone holding one booking can fill storage for free. */
+export const sweepOrphanFiles = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - 6 * 3600_000; // leave recent uploads alone: they may be mid-submit
+    const used = new Set<string>();
+    for (const b of await ctx.db.query("bookings").collect()) if (b.screenshotId) used.add(b.screenshotId);
+    /* Venue photos and the UPI QR are stored as getUrl() strings, not storage ids,
+       so collect the ids embedded in those URLs too — deleting one of those would
+       blank the payment QR. */
+    const referenced: string[] = [];
+    for (const v of await ctx.db.query("venues").collect()) if (v.image) referenced.push(v.image);
+    for (const s of await ctx.db.query("settings").collect()) referenced.push(s.value);
+    const haystack = referenced.join(" ");
+    let removed = 0;
+    for (const f of await ctx.db.system.query("_storage").take(1000)) {
+      if (f._creationTime < cutoff && !used.has(f._id) && !haystack.includes(f._id)) {
+        await ctx.storage.delete(f._id);
+        if (++removed >= 200) break; // keep each run small
+      }
+    }
+    return removed;
   },
 });
 
@@ -144,6 +202,17 @@ export async function submitProof(ctx: MutationCtx, b: Doc<"bookings">, utrRaw: 
   // (the file itself was checked by public.submitPayment; a throw here rolls back the mutation)
   const bad = (m: string) => fail(m);
   if (!/^[A-Z0-9]{6,35}$/.test(utr)) return bad("Enter the UTR / transaction ID from your payment app (usually 12 digits).");
+
+  /* One real transaction backs one booking. Refused outright rather than merely
+     flagged, so reusing a screenshot cannot reach the verification queue. */
+  const clash = await utrOwner(ctx, utr, b._id);
+  if (clash) {
+    return bad(
+      `That UTR is already recorded against booking ${clash.code}. ` +
+        "Each payment can only be used once — check you copied the right transaction ID, " +
+        "or contact us with your booking code.",
+    );
+  }
 
   if (b.status === "pending") return bad("We already have your payment proof — it is being verified.");
   if (b.status === "confirmed") return bad("This booking is already confirmed.");

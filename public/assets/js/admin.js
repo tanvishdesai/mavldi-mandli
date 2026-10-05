@@ -444,7 +444,7 @@
     const canScan = 'BarcodeDetector' in window && navigator.mediaDevices;
     pane.innerHTML = head('Gate check-in', 'Scan the guest’s QR, or type their booking code') + `
       <div class="gate">
-        <form id="gform"><input class="input" name="code" placeholder="MVXXXXXX" autocomplete="off" autocapitalize="characters" value="${esc(code || '')}" aria-label="Booking code"><button class="btn" type="submit">Look up</button></form>
+        <form id="gform"><input class="input" name="code" placeholder="MVXXXXXXXX" autocomplete="off" autocapitalize="characters" value="${esc(code || '')}" aria-label="Booking code"><button class="btn" type="submit">Look up</button></form>
         ${canScan ? '<button class="btn ghost" type="button" id="scanBtn">📷 Scan QR with camera</button><video id="scanVideo" playsinline hidden></video>' : '<p class="muted sm">Tip: scanning the guest’s QR with your phone camera opens this page with their code filled in.</p>'}
         <div id="verdict"></div>
       </div>`;
@@ -465,7 +465,7 @@
       try {
         const codes = await det.detect(video);
         const raw = codes[0] && codes[0].rawValue;
-        const m = raw && raw.match(/MV[A-Z0-9]{6}/);
+        const m = raw && raw.match(/MV[A-Z0-9]{6,8}/);
         if (m) { stopScan(); video.hidden = true; $('#gform').code.value = m[0]; lookupGate(m[0]); return; }
       } catch { /* keep trying */ }
       requestAnimationFrame(loop);
@@ -665,13 +665,18 @@
   /* ================= settings ================= */
   async function settings(pane) {
     pane.dataset.view = 'settings';
-    let s;
-    try { s = await Q(F.settings); } catch (e) { return fail(pane, e); }
+    let s, pay;
+    try { [s, pay] = await Promise.all([Q(F.settings), Q(F.paymentSettings)]); } catch (e) { return fail(pane, e); }
+    /* Where the money goes lives in its own form below, because changing it
+       requires the password again — a stolen session must not be able to
+       redirect every future payment. */
+    const payFields = [
+      { name: 'upi_id', label: 'UPI ID', required: true, placeholder: 'yourname@okhdfcbank', help: 'Money goes here. Double-check it!' },
+      { name: 'upi_payee_name', label: 'Payee name', required: true },
+      { name: 'upi_qr_image', label: 'Your own QR image (optional)', type: 'image', full: true, help: 'Leave empty to auto-generate a QR per booking with the exact amount filled in (recommended).' },
+    ];
     const groups = [
-      ['Payment (UPI)', [
-        { name: 'upi_id', label: 'UPI ID', required: true, placeholder: 'yourname@okhdfcbank', help: 'Money goes here. Double-check it!' },
-        { name: 'upi_payee_name', label: 'Payee name', required: true },
-        { name: 'upi_qr_image', label: 'Your own QR image (optional)', type: 'image', full: true, help: 'Leave empty to auto-generate a QR per booking with the exact amount filled in (recommended).' },
+      ['Booking &amp; payment window', [
         { name: 'payment_instructions', label: 'Payment instructions', type: 'textarea', full: true },
         { name: 'hold_minutes', label: 'Minutes to pay before passes are released', type: 'number', min: 5 },
         { name: 'max_items_per_booking', label: 'Max passes per booking', type: 'number', min: 1 },
@@ -692,11 +697,46 @@
     pane.innerHTML = head('Settings', 'Payment details, event text and contact info') + `<form class="sgrid" id="sform" novalidate>
       ${groups.map(([t, fs]) => `<section class="panel2"><h2>${t}</h2><div class="pad">${fs.map((f) => fieldHtml(f, s[f.name])).join('')}</div></section>`).join('')}
       <div class="savebar"><button class="btn" type="submit">Save settings</button></div></form>
+      <form class="sgrid" id="payform" style="margin-top:10px" novalidate><section class="panel2"><h2>Payment (UPI) — where the money goes</h2><div class="pad">
+        ${payFields.map((f) => fieldHtml(f, pay[f.name])).join('')}
+        <label class="field"><span>Your admin password</span><input type="password" name="password" autocomplete="current-password" required></label>
+        <p class="full muted sm">Changing these redirects every future payment, so your password is required and the change is recorded.</p>
+        <div class="full"><button class="btn sm" type="submit">Save payment details</button></div></div></section></form>
       <form class="sgrid" id="pwform" style="margin-top:10px"><section class="panel2"><h2>Admin password</h2><div class="pad">
         <label class="field"><span>Current password</span><input type="password" name="current" autocomplete="current-password" required></label>
-        <label class="field"><span>New password (8+ characters)</span><input type="password" name="next" minlength="8" autocomplete="new-password" required></label>
-        <div class="full"><button class="btn sm" type="submit">Change password</button></div></div></section></form>`;
+        <label class="field"><span>New password (12+ characters)</span><input type="password" name="next" minlength="12" autocomplete="new-password" required></label>
+        <div class="full"><button class="btn sm" type="submit">Change password</button></div></div></section></form>
+      <section class="panel2" style="margin-top:10px"><h2>Recent changes <button class="iconbtn" type="button" id="logBtn">Show</button></h2><div class="pad" id="logBox"></div></section>`;
     wireFields($('#sform'));
+    wireFields($('#payform'));
+    $('#payform').onsubmit = async (e) => {
+      e.preventDefault();
+      const btn = e.submitter || e.target.querySelector('[type=submit]');
+      const password = e.target.password.value;
+      if (!password) { toast('Enter your admin password to change payment details.', 'bad'); return; }
+      busy(btn, true, 'Saving…');
+      const vals = readForm(e.target, payFields);
+      try {
+        await authed(a(fns.admin.savePaymentSettings, {
+          token, password, values: Object.fromEntries(Object.entries(vals).map(([k, v]) => [k, String(v)])),
+        }));
+        toast('Payment details saved', 'ok');
+        e.target.password.value = '';
+      } catch (ex) { toast(ex.message, 'bad'); }
+      busy(btn, false);
+    };
+    $('#logBtn').onclick = async (e) => {
+      busy(e.target, true, 'Loading…');
+      try {
+        const rows = await Q(F.auditLog);
+        $('#logBox').innerHTML = rows.length
+          ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>When</th><th>What</th><th>Subject</th><th>From</th><th>To</th></tr></thead><tbody>
+              ${rows.map((r) => `<tr><td class="muted sm">${esc(when(r.at))}</td><td class="mono sm">${esc(r.action)}</td><td>${esc(r.subject || '—')}</td><td class="sm">${esc(r.before || '—')}</td><td class="sm">${esc(r.after || '—')}</td></tr>`).join('')}
+            </tbody></table></div>`
+          : '<p class="muted">Nothing recorded yet.</p>';
+      } catch (ex) { toast(ex.message, 'bad'); }
+      busy(e.target, false);
+    };
     $('#sform').onsubmit = async (e) => {
       e.preventDefault();
       const btn = e.submitter || e.target.querySelector('[type=submit]');

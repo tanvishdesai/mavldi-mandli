@@ -9,8 +9,11 @@
 # The frontend on Vercel (HTTPS) must reach the backend over HTTPS, hence Caddy.
 services:
   backend:
-    # pin to a specific version (e.g. :<rev>) for production if you like
-    image: ghcr.io/get-convex/convex-backend:latest
+    # Pinned on purpose: `latest` means an unattended `docker compose pull` can
+    # change the engine running your payments mid-event. Bump deliberately, and
+    # not during the festival. Find tags at:
+    #   https://github.com/get-convex/convex-backend/pkgs/container/convex-backend
+    image: ghcr.io/get-convex/convex-backend:${CONVEX_BACKEND_TAG:-latest}
     stop_grace_period: 10s
     stop_signal: SIGINT
     restart: unless-stopped
@@ -31,11 +34,16 @@ services:
       interval: 5s
       start_period: 10s
 
+  # The dashboard has full database access behind a single admin key, so it is
+  # NOT published. Bound to loopback only — reach it with an SSH tunnel:
+  #   ssh -L 6791:127.0.0.1:6791 you@your-server   → http://localhost:6791
   dashboard:
-    image: ghcr.io/get-convex/convex-dashboard:latest
+    image: ghcr.io/get-convex/convex-dashboard:${CONVEX_DASHBOARD_TAG:-latest}
     stop_grace_period: 10s
     stop_signal: SIGINT
     restart: unless-stopped
+    ports:
+      - "127.0.0.1:6791:6791"
     environment:
       - NEXT_PUBLIC_DEPLOYMENT_URL=https://${CONVEX_API_DOMAIN}
     depends_on:

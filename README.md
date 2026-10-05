@@ -21,8 +21,15 @@ docker compose exec backend ./generate_admin_key.sh   # copy the key it prints
 ```
 
 - Your backend URL is `https://api.mavladi.example`. The site uses it as its `CONVEX_URL`.
-- The dashboard is at `https://convex.mavladi.example`; sign in with the admin key. It lets you browse tables, logs and files.
-- Data, including every uploaded screenshot, lives in the `data` Docker volume. **Back it up.** Postgres is optional: set `POSTGRES_URL` in `.env`.
+- Data, including every uploaded screenshot, lives in the `data` Docker volume. **Back it up on a schedule**, not just once — it is the only copy of every booking. Postgres is optional: set `POSTGRES_URL` in `.env`.
+- **The admin key is root.** It grants full read/write on the database, the ability to run any function, and access to every booking secret and uploaded screenshot. Treat it like a production database password: never commit it, and rotate it after the event.
+- **The dashboard is not published by default**, because it is protected by nothing but that one key. `docker-compose.yml` binds it to `127.0.0.1:6791`, so reach it over an SSH tunnel when you need it:
+
+  ```bash
+  ssh -L 6791:127.0.0.1:6791 you@your-server     # then open http://localhost:6791
+  ```
+
+  If you would rather expose it on a domain, uncomment the dashboard block in `self-hosted/Caddyfile` and put `basic_auth` and an IP allowlist in front of it first.
 
 Then, from the project root on your computer:
 
@@ -33,9 +40,15 @@ CONVEX_SELF_HOSTED_URL=https://api.mavladi.example
 CONVEX_SELF_HOSTED_ADMIN_KEY=<the admin key>
 EOF
 npx convex deploy                                  # push the functions + schema
-npx convex env set ADMIN_PASSWORD 'something-strong'   # first admin password
+npx convex env set ADMIN_PASSWORD 'at-least-12-characters'   # REQUIRED before first sign-in
 npx convex run seed:run                            # optional sample data
 ```
+
+> `ADMIN_PASSWORD` is **mandatory and has no fallback**: until it is set (12 characters or more) the
+> admin sign-in refuses every attempt and tells you so. There is deliberately no built-in default,
+> because a default compiled into the source is a published admin password. The value is only used
+> for the very first sign-in, which hashes it (PBKDF2) into the database; change it from
+> **Settings → Admin password** afterwards and the environment value stops mattering.
 
 > Prefer Convex cloud? Run `npx convex dev` once to create a project, then use `CONVEX_DEPLOY_KEY` (a production deploy key from the Convex dashboard) wherever this README says `CONVEX_SELF_HOSTED_*`.
 
@@ -48,9 +61,10 @@ npx convex run seed:run                            # optional sample data
 
    With these set, every Vercel deploy **also pushes the Convex functions** and builds the site against that backend.
    If you'd rather deploy functions yourself and keep the admin key out of Vercel, set only `CONVEX_URL=https://api.mavladi.example` instead.
-3. Deploy. Then open `https://<your-site>/admin`, sign in with `ADMIN_PASSWORD` (the default is `mavladi2026` if you didn't set one; the dashboard warns until you change it), and:
+3. Deploy. Then open `https://<your-site>/admin`, sign in with the `ADMIN_PASSWORD` you set above, and:
    - load the sample data or add your venues and passes, and
-   - under **Settings**, enter your real **UPI ID** and **payee name**. Payments go to this ID, so double-check it.
+   - under **Settings → Payment (UPI)**, enter your real **UPI ID** and **payee name**. Payments go to this ID, so double-check it. Saving it asks for your admin password again and records the change under **Settings → Recent changes**.
+4. **If your Convex backend is on your own domain** (not `*.convex.cloud`), add it to the `connect-src` list in the `Content-Security-Policy` header in `vercel.json` — otherwise the browser will block the site from reaching its own backend. The shipped policy already covers `*.convex.cloud` and `*.convex.site`.
 
 ## Local development
 
@@ -93,11 +107,22 @@ The booking link has a secret made in the guest's browser (`t=`). Without it, or
 - **Venues** (with photo upload), **Passes & dates** ("add many nights" creates a whole date range at once), **FAQs**, **Settings** (UPI, payment window, booking on/off, texts, contact, password).
 
 ### Rules that keep stock honest
-- Each pass keeps running `held` and `sold` counters, updated in the **same Convex transaction** as the booking's status. Two people can never both buy the last pass.
+- Each pass keeps running `held`, `sold` and `unpaid` counters, updated in the **same Convex transaction** as the booking's status. Two people can never both buy the last pass.
 - Unpaid holds expire through a **scheduled function** at exactly their deadline, with a 10-minute cron as a safety net. If proof arrives just after expiry, the booking is kept when the passes are still available. If not, the proof is saved and the guest is asked to contact you.
-- A phone number can have at most 3 unpaid holds at once, so nobody can sit on the stock.
-- Payment screenshots are checked by their **actual bytes** (JPG/PNG/WebP/GIF only, 8 MB max). Rejected files are deleted.
-- Admin: the password is hashed with PBKDF2 and failed logins are throttled. Sessions use tokens made in the browser and expire after 7 days. Changing the password signs out every other device.
+- **Hold flooding is bounded three ways**: at most 3 unpaid holds per phone number, a rate limit per number, and — the backstop, since a phone number is just a string an attacker supplies — unpaid holds may never cover more than **25% of any pass's stock**, plus a hard ceiling of 1000 simultaneous unpaid holds event-wide. A script with ten thousand fake numbers can delay at most a quarter of sales, not the event.
+
+### Rules that keep the money honest
+- **One UTR, one booking.** A transaction ID already recorded against a live booking is **refused** at submission, so the same payment screenshot cannot be reused. Confirming past a duplicate requires an explicit override and is written to the audit log.
+- **Payment details need the password, not just a session.** Changing the UPI ID, payee name or QR image goes through `savePaymentSettings`, which re-verifies the admin password and records the old and new value. A stolen session token cannot silently redirect every future payment.
+- **An append-only audit log** (`auditLog`) records every confirm, reject, cancel, delete, counter booking, UTR edit and payment-setting change, with the previous value. Visible under **Settings → Recent changes**.
+- Payment screenshots are checked by their **actual bytes** (JPG/PNG/WebP/GIF only, 8 MB max), then **re-stored under the content type we detected** — the browser does not get to declare a screenshot is HTML. Rejected files are deleted, and a 6-hourly cron removes uploads that were never attached to a booking.
+
+### Admin and guest access
+- The admin password is hashed with **PBKDF2 (100k iterations)** and compared in constant time. It **must** come from `ADMIN_PASSWORD` on first sign-in — there is no built-in default — and must be 12 characters or more.
+- Failed logins back off progressively (5s → 15s → 1m → 5m → 15m) rather than hard-locking the account, so nobody can lock the real admin out of the gate on a festival night by guessing wrong ten times.
+- Sessions use tokens made in the browser from `crypto.getRandomValues` and expire after 7 days. Changing the password signs out every other device.
+- A guest's booking is opened by a per-booking secret, checked on **every** read and write path. **Find my booking** (code + phone → secret) is rate limited on both the code and the phone, so it cannot be used as a guessing oracle.
+- The site sends a strict **Content-Security-Policy** (`script-src 'self'`, no inline scripts or handlers), plus HSTS, `frame-ancestors`, `Permissions-Policy` and `no-referrer` on `/ticket` — whose URL carries the booking secret.
 
 ## The scroll journey
 

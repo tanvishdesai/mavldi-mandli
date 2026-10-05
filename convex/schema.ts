@@ -58,6 +58,10 @@ export default defineSchema({
     sort: v.number(),
     held: v.number(), // awaiting_payment + pending + confirmed
     sold: v.number(), // confirmed only
+    // awaiting_payment only: nobody has paid for these yet, so a flood of them is
+    // how you deny the whole event its stock. Capped per pass in createBooking.
+    // Optional so existing rows need no migration; absent reads as 0.
+    unpaid: v.optional(v.number()),
   }).index("by_venue", ["venueId"]),
 
   bookings: defineTable({
@@ -98,6 +102,18 @@ export default defineSchema({
 
   sessions: defineTable({ token: v.string(), expiresAt: v.number() }).index("by_token", ["token"]),
 
-  // login throttle
+  // rate limiting: one row per bucket key (login, booking:<phone>, lookup:<code>, …)
   attempts: defineTable({ key: v.string(), count: v.number(), resetAt: v.number() }).index("by_key", ["key"]),
+
+  /* Append-only record of the actions that move money or change where money goes.
+     With a single shared admin password this cannot attribute to a person, but it
+     answers "what changed, when, and from what" during reconciliation. */
+  auditLog: defineTable({
+    at: v.number(),
+    action: v.string(), // settings.upi_id | booking.confirm | booking.delete | password.change | …
+    subject: v.optional(v.string()), // booking code, setting key, …
+    before: v.optional(v.string()),
+    after: v.optional(v.string()),
+    note: v.optional(v.string()),
+  }).index("by_at", ["at"]),
 });

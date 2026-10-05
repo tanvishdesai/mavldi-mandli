@@ -2,13 +2,13 @@
    session tokens chosen by the admin's browser and registered here on a
    successful login. Every admin function takes that token. */
 import { v } from "convex/values";
-import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { fail, getSetting, setSetting } from "./lib";
+import { audit, fail, getSetting, setSetting, timingSafeEqual } from "./lib";
 
-const DEFAULT_PASSWORD = "mavladi2026";
 const SESSION_MS = 7 * 24 * 3600_000;
 const ITER = 100_000;
+const MIN_PASSWORD = 12;
 
 const hex = (b: ArrayBuffer | Uint8Array) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
 const unhex = (s: string): Uint8Array<ArrayBuffer> => new Uint8Array(s.match(/../g)!.map((h) => parseInt(h, 16)));
@@ -21,13 +21,10 @@ async function hashPassword(pw: string) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   return `pbkdf2$${ITER}$${hex(salt)}$${await pbkdf2(pw, salt, ITER)}`;
 }
-async function verify(pw: string, stored: string) {
-  const [alg, iter, salt, want] = stored.split("$");
+async function verify(pw: string, stored: string | undefined) {
+  const [alg, iter, salt, want] = String(stored ?? "").split("$");
   if (alg !== "pbkdf2" || !salt || !want) return false;
-  const got = await pbkdf2(pw, unhex(salt), parseInt(iter, 10));
-  let diff = got.length ^ want.length;
-  for (let i = 0; i < Math.min(got.length, want.length); i++) diff |= got.charCodeAt(i) ^ want.charCodeAt(i);
-  return diff === 0;
+  return timingSafeEqual(await pbkdf2(pw, unhex(salt), parseInt(iter, 10)), want);
 }
 const validToken = (t: string) => /^[A-Za-z0-9_-]{32,}$/.test(t);
 
@@ -36,20 +33,28 @@ export const _state = internalQuery({
   handler: async (ctx) => ({ hash: await getSetting(ctx, "admin_password_hash") }),
 });
 
-/* at most 10 failed tries per 15 minutes */
+/* Progressive backoff on failed logins instead of a flat 15-minute lockout.
+   A flat lockout keyed on one global row let anyone lock the real admin out of
+   the panel all night by failing ten times; PBKDF2 at 100k iterations is itself
+   a hard rate limit on guessing, so the lock only has to blunt bursts. Already
+   signed-in devices (7-day sessions) are unaffected either way.
+   ponytail: global key because a mutation sees no client IP — per-IP needs the
+   login moved behind an httpAction, which is the upgrade if this is ever abused. */
+const BACKOFF_MS = [0, 0, 0, 5_000, 15_000, 60_000, 300_000, 900_000];
+const backoffFor = (fails: number) => BACKOFF_MS[Math.min(fails, BACKOFF_MS.length - 1)];
+
 export const _throttle = internalMutation({
   args: { reset: v.optional(v.boolean()) },
   handler: async (ctx, { reset }) => {
     const now = Date.now();
     const row = await ctx.db.query("attempts").withIndex("by_key", (q) => q.eq("key", "login")).unique();
-    if (reset) { if (row) await ctx.db.delete(row._id); return true; }
-    if (!row || row.resetAt < now) {
-      if (row) await ctx.db.delete(row._id);
-      await ctx.db.insert("attempts", { key: "login", count: 1, resetAt: now + 15 * 60_000 });
-      return true;
-    }
-    await ctx.db.patch(row._id, { count: row.count + 1 });
-    return row.count < 10;
+    if (reset) { if (row) await ctx.db.delete(row._id); return 0; }
+    // `resetAt` here is "locked until"; count is consecutive failures
+    if (row && row.resetAt > now) return row.resetAt - now; // still cooling off
+    const fails = row && row.resetAt > now - 3600_000 ? row.count : 0; // forget after an idle hour
+    if (row) await ctx.db.patch(row._id, { count: fails + 1, resetAt: now + backoffFor(fails + 1) });
+    else await ctx.db.insert("attempts", { key: "login", count: 1, resetAt: now + backoffFor(1) });
+    return 0;
   },
 });
 
@@ -70,17 +75,30 @@ export const login = action({
   args: { password: v.string(), token: v.string() },
   handler: async (ctx, { password, token }) => {
     if (!validToken(token)) fail("Please refresh and try again.");
-    if (!(await ctx.runMutation(internal.auth._throttle, {}))) fail("Too many attempts. Try again in 15 minutes.", "RATE_LIMIT");
+    const waitMs = await ctx.runMutation(internal.auth._throttle, {});
+    if (waitMs > 0) {
+      fail(`Too many attempts. Try again in ${Math.ceil(waitMs / 1000)} seconds.`, "RATE_LIMIT");
+    }
     const { hash } = await ctx.runQuery(internal.auth._state, {});
     if (hash) {
       if (!(await verify(password, hash))) fail("Wrong password.", "UNAUTHENTICATED");
       await ctx.runMutation(internal.auth._startSession, { token });
     } else {
-      // first sign-in ever: the password comes from the deployment's environment
-      const initial = process.env.ADMIN_PASSWORD || DEFAULT_PASSWORD;
-      if (password !== initial) fail("Wrong password.", "UNAUTHENTICATED");
+      /* First sign-in ever. The password must come from the deployment's
+         environment: there is deliberately no built-in fallback, because a
+         fallback compiled into a public repo is a published admin password.
+         Set it with: npx convex env set ADMIN_PASSWORD '<strong password>' */
+      const initial = process.env.ADMIN_PASSWORD;
+      if (!initial || initial.length < MIN_PASSWORD) {
+        fail(
+          "This deployment has no admin password set. Set ADMIN_PASSWORD " +
+            `(at least ${MIN_PASSWORD} characters) on the Convex deployment, then sign in.`,
+          "NOT_CONFIGURED",
+        );
+      }
+      if (!timingSafeEqual(password, initial!)) fail("Wrong password.", "UNAUTHENTICATED");
       await ctx.runMutation(internal.auth._startSession, {
-        token, hash: await hashPassword(password), isDefault: !process.env.ADMIN_PASSWORD,
+        token, hash: await hashPassword(password), isDefault: false,
       });
     }
     await ctx.runMutation(internal.auth._throttle, { reset: true });
@@ -95,6 +113,7 @@ export const _setPassword = internalMutation({
     await setSetting(ctx, "admin_password_is_default", "0");
     // sign out every other device
     for (const s of await ctx.db.query("sessions").collect()) if (s.token !== token) await ctx.db.delete(s._id);
+    await audit(ctx, "password.change");
   },
 });
 
@@ -104,8 +123,25 @@ export const changePassword = action({
     if (!(await ctx.runQuery(internal.auth._isSession, { token }))) fail("Please sign in again.", "UNAUTHENTICATED");
     const { hash } = await ctx.runQuery(internal.auth._state, {});
     if (!(await verify(current, hash))) fail("Current password is wrong.");
-    if (next.length < 8) fail("New password must be at least 8 characters.");
+    if (next.length < MIN_PASSWORD) fail(`New password must be at least ${MIN_PASSWORD} characters.`);
+    if (next === current) fail("Pick a password you have not used here before.");
     await ctx.runMutation(internal.auth._setPassword, { token, hash: await hashPassword(next) });
+    return true;
+  },
+});
+
+/* Re-authentication for actions that change where money goes. Takes the live
+   session AND the password, so a stolen session token alone cannot redirect
+   payments. Throttled on the same bucket as login. */
+export const requirePassword = internalAction({
+  args: { token: v.string(), password: v.string() },
+  handler: async (ctx, { token, password }): Promise<true> => {
+    if (!(await ctx.runQuery(internal.auth._isSession, { token }))) fail("Please sign in again.", "UNAUTHENTICATED");
+    const waitMs = await ctx.runMutation(internal.auth._throttle, {});
+    if (waitMs > 0) fail(`Too many attempts. Try again in ${Math.ceil(waitMs / 1000)} seconds.`, "RATE_LIMIT");
+    const { hash } = await ctx.runQuery(internal.auth._state, {});
+    if (!(await verify(password, hash))) fail("Password is wrong.", "UNAUTHENTICATED");
+    await ctx.runMutation(internal.auth._throttle, { reset: true });
     return true;
   },
 });

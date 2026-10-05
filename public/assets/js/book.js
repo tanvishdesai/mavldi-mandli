@@ -26,7 +26,8 @@
       if (cfg.terms_text) $('#termsText').textContent = `I have read and agree: ${cfg.terms_text}`;
       venues = cat.venues;
     } catch (e) {
-      $('#passArea').innerHTML = `<div class="notice bad">${esc(e.message)} <button class="linkbtn" onclick="location.reload()">Retry</button></div>`;
+      $('#passArea').innerHTML = `<div class="notice bad">${esc(e.message)} <button class="linkbtn" id="retryBtn" type="button">Retry</button></div>`;
+      $('#retryBtn').addEventListener('click', () => location.reload());
       return;
     }
     const dates = [...new Set(venues.flatMap((v) => v.passes.map((p) => p.date)).filter(Boolean))].sort();

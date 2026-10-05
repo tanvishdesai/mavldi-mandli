@@ -1,9 +1,12 @@
 /* Everything a guest's browser may call. */
 import { v } from "convex/values";
-import { action, internalMutation, mutation, query } from "./_generated/server";
+import { action, internalMutation, internalQuery, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
-import { allSettings, fail, getSetting, normPhone, PUBLIC_SETTINGS, todayIST, upiUri, applyStatus, type Status } from "./lib";
+import {
+  allSettings, fail, getSetting, LIMITS, limit, normPhone, PUBLIC_SETTINGS,
+  todayIST, upiUri, applyStatus, type Status,
+} from "./lib";
 import { bookingByCode, bookingInput, createBooking as create, submitProof } from "./bookings";
 
 export const config = query({
@@ -106,13 +109,17 @@ export const uploadUrl = mutation({
     const b = await owned(ctx, code, secret);
     if (!b) fail("Booking not found.", "NOT_FOUND");
     if (!["awaiting_payment", "expired"].includes(b!.status)) fail("This booking isn't waiting for payment.");
+    // an upload URL per retry is fine; thousands of them is a free storage flood
+    await limit(ctx, `upload:${b!.code}`, LIMITS.uploadPerBooking.max, LIMITS.uploadPerBooking.windowMs,
+      "Too many upload attempts. Please wait a few minutes, then try again.");
     return ctx.storage.generateUploadUrl();
   },
 });
 
 /* Payment proof: the image is checked by its actual bytes (not the browser's
    claimed type), then recorded in one transaction. Rejected files are deleted. */
-function sniff(b: Uint8Array) {
+const MIME = { jpg: "image/jpeg", png: "image/png", webp: "image/webp", gif: "image/gif" } as const;
+function sniff(b: Uint8Array): keyof typeof MIME | null {
   if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return "jpg";
   if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return "png";
   const ascii = (i: number, n: number) => String.fromCharCode(...b.slice(i, i + n));
@@ -128,13 +135,21 @@ export const submitPayment = action({
     const reject = async (m: string) => { await ctx.storage.delete(a.storageId); return fail(m); };
     if (!blob) return fail("Upload failed. Please attach the screenshot again.");
     if (blob.size > 8 * 1024 * 1024) return reject("That image is too large (max 8 MB).");
-    if (!sniff(new Uint8Array(await blob.slice(0, 16).arrayBuffer()))) {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const kind = sniff(bytes.subarray(0, 16));
+    if (!kind) {
       return reject("Please upload a JPG, PNG or WebP image (HEIC photos: take a screenshot instead).");
     }
+    /* The browser chose the Content-Type on the original upload, so a file with
+       image magic bytes could still be served as text/html from the Convex
+       storage origin and run when an admin opens it. Re-store the same bytes
+       under the type we actually detected, and drop the client-typed original. */
+    const safeId = await ctx.storage.store(new Blob([bytes], { type: MIME[kind] }));
+    await ctx.storage.delete(a.storageId);
     try {
-      return await ctx.runMutation(internal.public._recordPayment, a);
+      return await ctx.runMutation(internal.public._recordPayment, { ...a, storageId: safeId });
     } catch (e) {
-      await ctx.storage.delete(a.storageId);
+      await ctx.storage.delete(safeId);
       throw e;
     }
   },
@@ -160,13 +175,45 @@ export const cancelBooking = mutation({
   },
 });
 
-/* Find my booking: code + phone -> the secret that opens it. */
-export const lookup = mutation({
+/* Find my booking: code + phone -> the secret that opens it.
+   This is the one public endpoint where guessing pays, so it is rate limited on
+   both halves of the pair: by code (hunting for the matching phone) and by phone
+   (someone who knows a guest's number, hunting for their code).
+
+   It has to be an action calling a separate counting mutation, not a single
+   mutation: a Convex mutation that throws rolls back its own writes, so a
+   counter incremented in the same transaction as the failure would never
+   persist and the limit would never bite. Same shape as auth.login. */
+const LOOKUP_BUSY = "Too many attempts. Please wait 15 minutes, or contact us with your booking code.";
+
+export const _lookupAttempt = internalMutation({
   args: { code: v.string(), phone: v.string() },
   handler: async (ctx, { code, phone }) => {
-    if (!code.trim()) fail("Enter your booking code (it starts with MV).");
+    await limit(ctx, `lookupc:${code}`, LIMITS.lookupPerCode.max, LIMITS.lookupPerCode.windowMs, LOOKUP_BUSY);
+    if (phone) {
+      await limit(ctx, `lookupp:${phone}`, LIMITS.lookupPerPhone.max, LIMITS.lookupPerPhone.windowMs, LOOKUP_BUSY);
+    }
+  },
+});
+
+export const _lookupFind = internalQuery({
+  args: { code: v.string(), phone: v.string() },
+  handler: async (ctx, { code, phone }) => {
     const b = await bookingByCode(ctx, code);
-    if (!b || b.phone !== normPhone(phone)) fail("No booking matches that code and phone number.", "NOT_FOUND");
-    return { code: b!.code, secret: b!.secret };
+    if (!b || b.phone !== phone) return null;
+    return { code: b.code, secret: b.secret };
+  },
+});
+
+export const lookup = action({
+  args: { code: v.string(), phone: v.string() },
+  handler: async (ctx, { code, phone }): Promise<{ code: string; secret: string }> => {
+    if (!String(code).trim()) fail("Enter your booking code (it starts with MV).");
+    const dialled = normPhone(phone);
+    const norm = String(code).trim().toUpperCase().slice(0, 16);
+    await ctx.runMutation(internal.public._lookupAttempt, { code: norm, phone: dialled });
+    const found = await ctx.runQuery(internal.public._lookupFind, { code: norm, phone: dialled });
+    if (!found) fail("No booking matches that code and phone number.", "NOT_FOUND");
+    return found!;
   },
 });

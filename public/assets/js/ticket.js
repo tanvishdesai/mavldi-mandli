@@ -244,11 +244,12 @@
         <p class="foot">Verified ${esc(when(b.verified_at))}${b.items.some((i) => !i.date) ? ' · valid all nights' : nights.length ? ` · valid for ${new Set(nights).size} night${new Set(nights).size > 1 ? 's' : ''}` : ''}<br>Non-transferable · traditional attire please</p>
       </article>
       <div class="noprint" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
-        <button class="btn" type="button" onclick="print()">Save / print pass</button>
+        <button class="btn" type="button" id="printBtn">Save / print pass</button>
         <button class="btn ghost" type="button" id="copyLink">Copy pass link</button>
       </div>
       <div class="noprint" style="text-align:center;color:var(--ink-3);font-size:.9rem">Tip: take a screenshot of this pass so you have it even without signal at the ground.</div>`;
     $('#copyLink').onclick = copyLink;
+    $('#printBtn').onclick = () => print();
   }
 
   function copy(text, msg) {
@@ -265,7 +266,7 @@
     const html = `
       <form class="card frame lookup" id="lookForm" novalidate>
         <div class="stack">
-          <label class="field"><span>Booking code</span><input name="code" autocapitalize="characters" autocomplete="off" placeholder="MVXXXXXX" required maxlength="12" value="${esc(code)}"></label>
+          <label class="field"><span>Booking code</span><input name="code" autocapitalize="characters" autocomplete="off" placeholder="MVXXXXXXXX" required maxlength="12" value="${esc(code)}"></label>
           <label class="field"><span>Mobile number</span><input name="phone" type="tel" inputmode="numeric" placeholder="10-digit mobile" required maxlength="14"></label>
           <div class="notice bad formerr" id="lookErr" role="alert"></div>
           <button class="btn block" id="lookBtn" type="submit">Find my pass</button>
@@ -281,7 +282,7 @@
       const btn = $('#lookBtn');
       busy(btn, true, 'Looking…');
       try {
-        const r = await m(fns.public.lookup, { code: f.code.value.trim(), phone: f.phone.value });
+        const r = await a(fns.public.lookup, { code: f.code.value.trim(), phone: f.phone.value });
         location.href = `/ticket?code=${encodeURIComponent(r.code)}&t=${encodeURIComponent(r.secret)}`;
       } catch (ex) {
         busy(btn, false);
