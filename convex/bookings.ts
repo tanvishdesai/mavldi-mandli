@@ -34,7 +34,8 @@ export const bookingInput = {
 
 type CreateOpts = { admin?: boolean; status?: Status; source?: string; secret: string; utr?: string };
 
-/* Shared by the public checkout and the admin counter booking. */
+/* Shared by the public checkout and the admin counter booking.
+   One ground, one kind of pass: a booking is just "n passes for night X". */
 export async function createBooking(
   ctx: MutationCtx,
   input: { name: string; phone: string; email?: string; note?: string; items: { passId: Id<"passes">; qty: number }[] },
@@ -63,7 +64,7 @@ export async function createBooking(
       "Too many booking attempts from this number. Please try again in a little while.");
     /* Ceiling on unpaid holds event-wide. The per-phone caps above are keyed on
        an attacker-supplied number, so this is the backstop that keeps a script
-       with ten thousand fake numbers from parking the whole catalogue. */
+       with ten thousand fake numbers from parking the whole event. */
     const holdsNow = await ctx.db.query("counters").withIndex("by_status", (q) => q.eq("status", "awaiting_payment")).unique();
     if ((holdsNow?.n ?? 0) >= LIMITS.maxOpenHolds) {
       fail("A lot of people are paying right now. Please try again in a few minutes.", "BUSY");
@@ -75,36 +76,33 @@ export async function createBooking(
     const qty = Math.floor(it.qty);
     if (qty >= 1) want.set(it.passId, (want.get(it.passId) || 0) + qty);
   }
-  if (!want.size) fail("Pick at least one pass.");
+  if (!want.size) fail("Pick at least one night.");
   const maxTotal = parseInt(await getSetting(ctx, "max_items_per_booking"), 10) || 20;
   const totalQty = [...want.values()].reduce((a, b) => a + b, 0);
   if (!admin && totalQty > maxTotal) fail(`You can book at most ${maxTotal} passes at a time.`);
 
+  // the one price there is; snapshotted per line so a later change leaves history alone
+  const price = Math.max(0, Math.floor(parseFloat(await getSetting(ctx, "pass_price")) || 0));
   const today = todayIST();
   const items: Doc<"bookings">["items"] = [];
   for (const [id, qty] of want) {
     const p = await ctx.db.get(id);
-    if (!p) fail("One of the passes you picked no longer exists. Please refresh.");
-    const venue = await ctx.db.get(p!.venueId);
-    const what = `${p!.label}${p!.date ? " · " + fmtDate(p!.date) : ""}`;
-    if (!admin && (!p!.active || !venue?.active || (p!.date && p!.date < today))) fail(`${what} is not on sale any more.`);
-    if (!admin && qty > p!.maxPerBooking) fail(`At most ${p!.maxPerBooking} × ${what} per booking.`);
+    if (!p) fail("One of the nights you picked is no longer on sale. Please refresh.");
+    const what = fmtDate(p!.date);
+    if (!admin && (!p!.active || p!.date < today)) fail(`${what} is not on sale any more.`);
     const available = p!.quantity - p!.held;
     if (qty > available) fail(available > 0 ? `Only ${available} left for ${what}.` : `${what} just sold out.`, "SOLD_OUT");
-    /* Unpaid holds may never cover more than a quarter of a pass. Nobody paying
+    /* Unpaid holds may never cover more than a quarter of a night. Nobody paying
        normally notices; a flood of fake holds can delay at most 25% of sales. */
     if (!admin) {
-      const unpaidCap = Math.max(p!.maxPerBooking, Math.floor(p!.quantity * LIMITS.unpaidShareOfStock));
-      if ((p!.unpaid ?? 0) + qty > unpaidCap) {
+      const unpaidCap = Math.max(maxTotal, Math.floor(p!.quantity * LIMITS.unpaidShareOfStock));
+      if (p!.unpaid + qty > unpaidCap) {
         fail(`${what} has a lot of unpaid holds right now. Please try again in a few minutes.`, "BUSY");
       }
     }
-    items.push({
-      passId: p!._id, venueId: p!.venueId, qty, unitPrice: p!.price, admits: p!.admits,
-      venueName: venue?.name ?? "", passLabel: p!.label, passDate: p!.date,
-    });
+    items.push({ passId: p!._id, date: p!.date, qty, unitPrice: price });
   }
-  items.sort((a, b) => (a.passDate ?? "").localeCompare(b.passDate ?? ""));
+  items.sort((a, b) => a.date.localeCompare(b.date));
   const amount = items.reduce((s, i) => s + i.unitPrice * i.qty, 0);
 
   let code = newCode();
@@ -173,13 +171,10 @@ export const sweepOrphanFiles = internalMutation({
     const cutoff = Date.now() - 6 * 3600_000; // leave recent uploads alone: they may be mid-submit
     const used = new Set<string>();
     for (const b of await ctx.db.query("bookings").collect()) if (b.screenshotId) used.add(b.screenshotId);
-    /* Venue photos and the UPI QR are stored as getUrl() strings, not storage ids,
-       so collect the ids embedded in those URLs too — deleting one of those would
-       blank the payment QR. */
-    const referenced: string[] = [];
-    for (const v of await ctx.db.query("venues").collect()) if (v.image) referenced.push(v.image);
-    for (const s of await ctx.db.query("settings").collect()) referenced.push(s.value);
-    const haystack = referenced.join(" ");
+    /* The ground photo and the UPI QR are stored as getUrl() strings in settings,
+       not storage ids, so collect the ids embedded in those URLs too — deleting
+       one of those would blank the payment QR. */
+    const haystack = (await ctx.db.query("settings").collect()).map((s) => s.value).join(" ");
     let removed = 0;
     for (const f of await ctx.db.system.query("_storage").take(1000)) {
       if (f._creationTime < cutoff && !used.has(f._id) && !haystack.includes(f._id)) {

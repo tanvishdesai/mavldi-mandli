@@ -4,7 +4,7 @@ import { action, internalMutation, internalQuery, mutation, query } from "./_gen
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import {
-  allSettings, fail, getSetting, LIMITS, limit, normPhone, PUBLIC_SETTINGS,
+  allSettings, fail, LIMITS, limit, normPhone, PUBLIC_SETTINGS,
   todayIST, upiUri, applyStatus, type Status,
 } from "./lib";
 import { bookingByCode, bookingInput, createBooking as create, submitProof } from "./bookings";
@@ -19,33 +19,26 @@ export const config = query({
   },
 });
 
+/* The nights on sale. One ground, one kind of pass: a night is a date, a price
+   and how many are left. */
 export const catalogue = query({
   args: {},
   handler: async (ctx) => {
     const today = todayIST();
-    const open = (await getSetting(ctx, "booking_open")) === "1";
-    const venues = (await ctx.db.query("venues").collect()).filter((v) => v.active).sort((a, b) => a.sort - b.sort);
-    const out = [];
-    for (const v of venues) {
-      const passes = (await ctx.db.query("passes").withIndex("by_venue", (q) => q.eq("venueId", v._id)).collect())
-        .filter((p) => p.active)
-        .sort((a, b) => (a.date === null ? -1 : 0) - (b.date === null ? -1 : 0) || (a.date ?? "").localeCompare(b.date ?? "") || a.sort - b.sort)
-        .map((p) => {
-          const available = Math.max(0, p.quantity - p.held);
-          const past = p.date !== null && p.date < today;
-          return {
-            id: p._id, date: p.date, label: p.label, description: p.description ?? null, price: p.price,
-            quantity: p.quantity, available, admits: p.admits, max_per_booking: p.maxPerBooking,
-            past, bookable: open && !past && available > 0,
-          };
-        });
-      out.push({
-        id: v._id, name: v.name, name_gu: v.nameGu ?? null, city: v.city ?? null, address: v.address ?? null,
-        map_url: v.mapUrl ?? null, description: v.description ?? null, image: v.image ?? null,
-        start_time: v.startTime ?? null, passes,
+    const s = await allSettings(ctx);
+    const open = s.booking_open === "1";
+    const price = Math.max(0, Math.floor(parseFloat(s.pass_price) || 0));
+    const nights = (await ctx.db.query("passes").withIndex("by_date").collect())
+      .filter((p) => p.active)
+      .map((p) => {
+        const available = Math.max(0, p.quantity - p.held);
+        const past = p.date < today;
+        return {
+          id: p._id, date: p.date, quantity: p.quantity, available,
+          past, bookable: open && !past && available > 0,
+        };
       });
-    }
-    return { today, venues: out };
+    return { today, price, booking_open: open, nights };
   },
 });
 
@@ -88,8 +81,8 @@ export const booking = query({
       created_at: b._creationTime, expires_at: b.expiresAt ?? null, paid_at: b.paidAt ?? null,
       verified_at: b.verifiedAt ?? null, checkins: checkins.map((c) => c.night),
       message: ["rejected", "awaiting_payment", "cancelled"].includes(status) ? b.adminNote ?? null : null,
-      items: b.items.map((i) => ({ venue: i.venueName, label: i.passLabel, date: i.passDate, qty: i.qty, unit_price: i.unitPrice, admits: i.admits })),
-      admits: b.items.reduce((s, i) => s + i.qty * i.admits, 0),
+      items: b.items.map((i) => ({ date: i.date, qty: i.qty, unit_price: i.unitPrice })),
+      admits: b.items.reduce((s, i) => s + i.qty, 0),
     };
     if (status === "awaiting_payment") {
       const s = await allSettings(ctx);

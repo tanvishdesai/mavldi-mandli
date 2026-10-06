@@ -4,9 +4,9 @@ import { paginationOptsValidator } from "convex/server";
 import { action, internalMutation, mutation, query, type QueryCtx } from "./_generated/server";
 import { customMutation, customQuery } from "convex-helpers/server/customFunctions";
 import { internal } from "./_generated/api";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import {
-  allSettings, applyStatus, audit, clean, EDITABLE_SETTINGS, fail, fmtDate, gateNight,
+  allSettings, applyStatus, audit, clean, EDITABLE_SETTINGS, fail, fmtDate, gateNight, getSetting,
   normPhone, normUtr, PAYMENT_SETTINGS, requireAdmin, searchText, setSetting, todayIST,
   URL_SETTINGS, validEmail, validUrl, validPhone, type Status,
 } from "./lib";
@@ -26,13 +26,12 @@ const adminMutation = customMutation(mutation, {
 /* ================= dashboard ================= */
 export const stats = adminQuery({ args: {}, handler: async (ctx) => {
   const counters = await ctx.db.query("counters").collect();
-  const venues = new Map((await ctx.db.query("venues").collect()).map((x) => [x._id, x]));
-  const inventory = (await ctx.db.query("passes").collect())
+  const price = Math.max(0, Math.floor(parseFloat(await getSetting(ctx, "pass_price")) || 0));
+  const inventory = (await ctx.db.query("passes").withIndex("by_date").collect())
     .map((p) => ({
-      id: p._id, venue_id: p.venueId, venue: venues.get(p.venueId)?.name ?? "?", venue_sort: venues.get(p.venueId)?.sort ?? 0,
-      date: p.date, label: p.label, price: p.price, quantity: p.quantity, held: p.held, confirmed: p.sold, active: p.active, sort: p.sort,
-    }))
-    .sort((a, b) => a.venue_sort - b.venue_sort || (a.date ?? "").localeCompare(b.date ?? "") || a.sort - b.sort);
+      id: p._id, date: p.date, price, quantity: p.quantity,
+      held: p.held, unpaid: p.unpaid, confirmed: p.sold, active: p.active,
+    }));
   const night = gateNight();
   const checkins = (await ctx.db.query("checkins").withIndex("by_night", (q) => q.eq("night", night)).collect()).length;
   const pending = (await ctx.db.query("bookings").withIndex("by_status", (q) => q.eq("status", "pending")).take(500))
@@ -42,7 +41,7 @@ export const stats = adminQuery({ args: {}, handler: async (ctx) => {
   return {
     byStatus: counters.map((c) => ({ status: c.status, n: c.n, amount: c.amount })),
     inventory, checkins_today: checkins, pending_queue: pending, today: todayIST(), night,
-    empty: venues.size === 0,
+    price, empty: inventory.length === 0,
   };
 } });
 
@@ -52,12 +51,11 @@ const row = (b: Doc<"bookings">) => ({
   utr: b.utr ?? null, screenshot: !!b.screenshotId, source: b.source, created_at: b._creationTime,
   paid_at: b.paidAt ?? null, verified_at: b.verifiedAt ?? null, checked_in_at: b.lastCheckinAt ?? null,
   expires_at: b.expiresAt ?? null, admin_note: b.adminNote ?? null,
-  items: b.items.map((i) => ({ qty: i.qty, pass_label: i.passLabel, pass_date: i.passDate, venue_name: i.venueName, venue_id: i.venueId, unit_price: i.unitPrice, admits: i.admits })),
+  items: b.items.map((i) => ({ qty: i.qty, date: i.date, unit_price: i.unitPrice })),
 });
 
 export const listBookings = adminQuery({ args: {
   status: v.optional(v.string()),
-  venueId: v.optional(v.string()),
   date: v.optional(v.string()),
   q: v.optional(v.string()),
   paginationOpts: paginationOptsValidator,
@@ -74,9 +72,7 @@ export const listBookings = adminQuery({ args: {
   } else {
     res = await ctx.db.query("bookings").order("desc").paginate(a.paginationOpts);
   }
-  const page = res.page.filter((b) =>
-    (!a.venueId || b.items.some((i) => i.venueId === a.venueId)) &&
-    (!a.date || b.items.some((i) => (a.date === "season" ? i.passDate === null : i.passDate === a.date))));
+  const page = res.page.filter((b) => !a.date || b.items.some((i) => i.date === a.date));
   return { ...res, page: page.map(row) };
 } });
 
@@ -142,8 +138,8 @@ export const bookingAction = adminMutation({ args: {
       return true;
     }
     if (done) fail(`Already checked in tonight.`, "ALREADY");
-    const valid = b.items.some((i) => i.passDate === null || i.passDate === night);
-    if (!valid && !force) fail(`This pass is for ${[...new Set(b.items.map((i) => fmtDate(i.passDate)))].join(", ")}, not tonight.`, "WRONG_NIGHT");
+    const valid = b.items.some((i) => i.date === night);
+    if (!valid && !force) fail(`This pass is for ${[...new Set(b.items.map((i) => fmtDate(i.date)))].join(", ")}, not tonight.`, "WRONG_NIGHT");
     await ctx.db.insert("checkins", { bookingId: id, night, at: now });
     await ctx.db.patch(id, { lastCheckinAt: now });
     return true;
@@ -225,93 +221,57 @@ export const counterBooking = adminMutation({ args: {
   return { id: b._id, code: b.code };
 } });
 
-/* ================= venues ================= */
-const venueArgs = {
-  name: v.string(), nameGu: v.optional(v.string()), city: v.optional(v.string()), address: v.optional(v.string()),
-  mapUrl: v.optional(v.string()), description: v.optional(v.string()), image: v.optional(v.string()),
-  startTime: v.optional(v.string()), active: v.boolean(), sort: v.number(),
-};
-function venueDoc(a: any) {
-  const o = {
-    name: clean(a.name, 120), nameGu: clean(a.nameGu, 120) || undefined, city: clean(a.city, 80) || undefined,
-    address: clean(a.address, 300) || undefined, mapUrl: clean(a.mapUrl, 500) || undefined,
-    description: clean(a.description, 1000) || undefined, image: clean(a.image, 1000) || undefined,
-    startTime: clean(a.startTime, 60) || undefined, active: a.active, sort: a.sort || 0,
-  };
-  if (o.name.length < 2) fail("Venue name is required.");
-  if (o.mapUrl && !/^https?:\/\//i.test(o.mapUrl)) fail("Map link must start with http(s)://");
-  if (o.image && !/^(https?:\/\/|\/)/i.test(o.image)) fail("Image must be an uploaded file or a full URL.");
-  return o;
-}
-export const venues = adminQuery({ args: {}, handler: async (ctx) => {
-  const passes = await ctx.db.query("passes").collect();
-  return (await ctx.db.query("venues").collect()).sort((a, b) => a.sort - b.sort)
-    .map((x) => ({ ...x, id: x._id, pass_count: passes.filter((p) => p.venueId === x._id).length }));
-} });
-export const saveVenue = adminMutation({ args: { id: v.optional(v.id("venues")), ...venueArgs }, handler: async (ctx, a) => {
-  const doc = venueDoc(a);
-  if (a.id) { await ctx.db.replace(a.id, doc); return a.id; }
-  return ctx.db.insert("venues", doc);
-} });
-export const deleteVenue = adminMutation({ args: { id: v.id("venues") }, handler: async (ctx, { id }) => {
-  const passes = await ctx.db.query("passes").withIndex("by_venue", (q) => q.eq("venueId", id)).collect();
-  const held = passes.reduce((s, p) => s + p.held, 0);
-  if (held) fail(`This venue has ${held} passes booked or held. Deactivate it instead, or cancel those bookings first.`);
-  for (const p of passes) await ctx.db.delete(p._id);
-  await ctx.db.delete(id);
-} });
+/* ================= nights (stock per date) ================= */
+const nightArgs = { date: v.string(), quantity: v.number(), active: v.boolean() };
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
 
-/* ================= passes ================= */
-const passArgs = {
-  venueId: v.id("venues"), date: v.optional(v.union(v.string(), v.null())), label: v.string(), description: v.optional(v.string()),
-  price: v.number(), quantity: v.number(), maxPerBooking: v.number(), admits: v.number(), active: v.boolean(), sort: v.number(),
-};
-async function passDoc(ctx: QueryCtx, a: any) {
-  const o = {
-    venueId: a.venueId as Id<"venues">, date: a.date ? String(a.date).slice(0, 10) : null,
-    label: clean(a.label, 80) || "Entry Pass", description: clean(a.description, 300) || undefined,
-    price: Math.floor(a.price), quantity: Math.floor(a.quantity), maxPerBooking: Math.max(1, Math.floor(a.maxPerBooking) || 10),
-    admits: Math.max(1, Math.floor(a.admits) || 1), active: a.active, sort: a.sort || 0,
-  };
-  if (!(await ctx.db.get(o.venueId))) fail("Pick a venue.");
-  if (o.date && !/^\d{4}-\d{2}-\d{2}$/.test(o.date)) fail("Date must be YYYY-MM-DD.");
-  if (!Number.isFinite(o.price) || o.price < 0) fail("Price must be 0 or more.");
-  if (!Number.isFinite(o.quantity) || o.quantity < 0) fail("Quantity must be 0 or more.");
-  return o;
+function nightDoc(a: { date: string; quantity: number; active: boolean }) {
+  const date = String(a.date).slice(0, 10);
+  if (!ISO.test(date)) fail("Date must be YYYY-MM-DD.");
+  const quantity = Math.floor(a.quantity);
+  if (!Number.isFinite(quantity) || quantity < 0) fail("Quantity must be 0 or more.");
+  return { date, quantity, active: a.active };
 }
-export const passes = adminQuery({ args: { venueId: v.optional(v.id("venues")) }, handler: async (ctx, { venueId }) => {
-  const venues = new Map((await ctx.db.query("venues").collect()).map((x) => [x._id, x]));
-  const rows = venueId
-    ? await ctx.db.query("passes").withIndex("by_venue", (q) => q.eq("venueId", venueId)).collect()
-    : await ctx.db.query("passes").collect();
-  return rows
-    .map((p) => ({ ...p, id: p._id, venue_name: venues.get(p.venueId)?.name ?? "?", venue_sort: venues.get(p.venueId)?.sort ?? 0 }))
-    .sort((a, b) => a.venue_sort - b.venue_sort || (a.date === null ? -1 : 0) - (b.date === null ? -1 : 0) || (a.date ?? "").localeCompare(b.date ?? "") || a.sort - b.sort);
-} });
-export const savePass = adminMutation({ args: { id: v.optional(v.id("passes")), ...passArgs }, handler: async (ctx, a) => {
-  const doc = await passDoc(ctx, a);
+
+export const passes = adminQuery({ args: {}, handler: async (ctx) =>
+  (await ctx.db.query("passes").withIndex("by_date").collect())
+    .map((p) => ({ id: p._id, date: p.date, quantity: p.quantity, held: p.held, unpaid: p.unpaid, sold: p.sold, active: p.active })) });
+
+export const savePass = adminMutation({ args: { id: v.optional(v.id("passes")), ...nightArgs }, handler: async (ctx, a) => {
+  const doc = nightDoc(a);
   if (a.id) {
     const cur = await ctx.db.get(a.id);
-    if (!cur) fail("Pass not found.");
-    if (doc.quantity < cur!.held) fail(`${cur!.held} of these are already booked or held — quantity can't go below that.`);
+    if (!cur) fail("That night no longer exists.");
+    if (doc.quantity < cur!.held) fail(`${cur!.held} passes for this night are already booked or held — quantity can't go below that.`);
+    if (doc.date !== cur!.date && (await nightByDate(ctx, doc.date))) fail(`${fmtDate(doc.date)} is already in the list.`);
     await ctx.db.patch(a.id, doc);
     return a.id;
   }
-  return ctx.db.insert("passes", { ...doc, held: 0, sold: 0 });
+  if (await nightByDate(ctx, doc.date)) fail(`${fmtDate(doc.date)} is already in the list.`);
+  return ctx.db.insert("passes", { ...doc, held: 0, sold: 0, unpaid: 0 });
 } });
-export const bulkPasses = adminMutation({ args: { from: v.string(), to: v.string(), ...passArgs }, handler: async (ctx, a) => {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(a.from) || !/^\d{4}-\d{2}-\d{2}$/.test(a.to) || a.to < a.from) fail("Pick a valid date range.");
-  const base = await passDoc(ctx, { ...a, date: a.from });
-  let n = 0;
+
+const nightByDate = (ctx: QueryCtx, date: string) =>
+  ctx.db.query("passes").withIndex("by_date", (q) => q.eq("date", date)).unique();
+
+/* Add every night of the event in one go. Dates that already exist are left alone. */
+export const bulkPasses = adminMutation({ args: { from: v.string(), to: v.string(), quantity: v.number(), active: v.boolean() }, handler: async (ctx, a) => {
+  if (!ISO.test(a.from) || !ISO.test(a.to) || a.to < a.from) fail("Pick a valid date range.");
+  const base = nightDoc({ ...a, date: a.from });
+  let n = 0, made = 0;
   for (let d = new Date(a.from + "T00:00:00Z"); d <= new Date(a.to + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + 1)) {
     if (++n > 60) fail("That range is longer than 60 nights.");
-    await ctx.db.insert("passes", { ...base, date: d.toISOString().slice(0, 10), held: 0, sold: 0 });
+    const date = d.toISOString().slice(0, 10);
+    if (await nightByDate(ctx, date)) continue;
+    await ctx.db.insert("passes", { ...base, date, held: 0, sold: 0, unpaid: 0 });
+    made++;
   }
-  return n;
+  return made;
 } });
+
 export const deletePass = adminMutation({ args: { id: v.id("passes") }, handler: async (ctx, { id }) => {
   const p = await ctx.db.get(id);
-  if (p && p.held) fail(`${p.held} of these are booked or held. Take it off sale instead.`);
+  if (p && p.held) fail(`${p.held} passes for this night are booked or held. Take it off sale instead.`);
   if (p) await ctx.db.delete(id);
 } });
 
@@ -334,6 +294,10 @@ export const settings = adminQuery({ args: {}, handler: async (ctx) => {
 } });
 /* Shared validation for both settings paths. */
 function checkSettings(values: Record<string, string>) {
+  if (values.pass_price !== undefined) {
+    const n = parseFloat(values.pass_price);
+    if (!(n >= 0 && n <= 100000)) fail("Pass price must be a number between 0 and 100000.");
+  }
   if (values.upi_id !== undefined && !/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(values.upi_id.trim())) fail("UPI ID should look like name@bank.");
   if (values.hold_minutes !== undefined) {
     const m = parseInt(values.hold_minutes, 10);
@@ -401,7 +365,7 @@ export const fileUrl = adminMutation({ args: { storageId: v.id("_storage") }, ha
 } });
 
 export const loadSampleData = adminMutation({ args: {}, handler: async (ctx) => {
-  if ((await ctx.db.query("venues").first())) fail("There is already data. Sample data is only for an empty database.");
+  if ((await ctx.db.query("passes").first())) fail("There is already data. Sample data is only for an empty database.");
   await seedData(ctx);
 } });
 

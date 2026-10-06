@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Book Passes — Mavladi Mandli</title>
-  <meta name="description" content="Book Mavladi Mandli Navratri garba passes. Pick your venue and nights, pay by UPI.">
+  <meta name="description" content="Book Mavladi Mandli Navratri garba passes. Pick your nights, pay by UPI. One pass, one price.">
   <meta name="theme-color" content="#f4e7cf">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,7 +29,7 @@
       <span class="branch r" aria-hidden="true"></span>
       <p class="gu">પાસ બુક કરો</p>
       <h1 id="pageTitle">Book your passes</h1>
-      <p class="sub" id="pageSub">Pick a ground, choose your nights, and pay by UPI.</p>
+      <p class="sub" id="pageSub">One pass, <b id="priceLine">one price</b>. Choose your nights and pay by UPI.</p>
     </div>
 
     <ol class="stepper" id="stepper">
@@ -43,12 +43,11 @@
     <section id="stepPick" class="booking" aria-label="Choose passes">
       <div>
         <div id="closedNote" class="notice bad" hidden>Online bookings are closed right now. Please check back soon.</div>
-        <div class="venuepick" id="venuePick" role="group" aria-label="Venue"></div>
-        <p class="vinfo" id="venueInfo"></p>
-        <div id="passArea"><p class="summary empty">Loading passes…</p></div>
+        <p class="groundinfo" id="groundInfo"></p>
+        <div id="passArea"><p class="summary empty">Loading nights…</p></div>
       </div>
       <aside class="card frame summary pick" aria-label="Your selection">
-        <h3>Your passes</h3>
+        <h3>Your nights</h3>
         <div id="sumBody"></div>
       </aside>
     </section>

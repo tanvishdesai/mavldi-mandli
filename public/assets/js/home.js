@@ -9,14 +9,15 @@
 (function () {
   'use strict';
 
-  const { q, fns, esc, inr, dateParts, NAVDURGA } = window.MV;
+  const { q, fns, esc, inr, dateParts, PASS, NAVDURGA } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
   const lerp = (a, b, t) => a + (b - a) * t;
 
   /* =================== content =================== */
-  let catalogue = [];
+  let nights = [];
+  let price = 0;
   loadContent();
 
   async function loadContent() {
@@ -38,9 +39,10 @@
       if (cfg.youtube_url) bits.push(`<a href="${esc(cfg.youtube_url)}" target="_blank" rel="noopener">YouTube</a>`);
       $('#contactLine').innerHTML = bits.join('<span aria-hidden="true">·</span>');
     }
-    catalogue = cat ? cat.venues : [];
+    nights = cat ? cat.nights : [];
+    price = cat ? cat.price : 0;
     renderNights();
-    renderVenues(cat);
+    renderGround(cfg, cat);
     $('#faqList').innerHTML = faqs.map((f) =>
       `<details class="qa"><summary>${esc(f.question)}</summary><p>${esc(f.answer)}</p></details>`).join('');
     // one answer open at a time keeps the panel from outgrowing the screen
@@ -52,8 +54,8 @@
   }
 
   function renderNights() {
-    const dates = [...new Set(catalogue.flatMap((v) => v.passes.map((p) => p.date)).filter(Boolean))].sort();
-    const list = dates.length ? dates.slice(0, 9) : ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19'];
+    const dates = nights.map((n) => n.date);
+    const list = dates.length ? dates : ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19'];
     $('#nightList').innerHTML = list.map((d, i) => {
       const [en, gu] = NAVDURGA[i % 9];
       const p = dateParts(d);
@@ -62,40 +64,41 @@
         <span class="d">${p.d} ${p.m}</span></a>`;
     }).join('');
     $('#nightList').querySelectorAll('.night').forEach((a) => { a.style.textDecoration = 'none'; });
-    $('#f-venues').textContent = catalogue.length || '—';
+    $('#f-nights').textContent = list.length;
+    if (price) $('#f-price').textContent = inr(price);
   }
 
-  function renderVenues(cat) {
-    const box = $('#venueList');
-    if (!cat) { box.innerHTML = '<p class="lede">Couldn’t load venues just now. <a href="/book" style="color:var(--marigold)">Open the booking page</a>.</p>'; return; }
-    if (!catalogue.length) { box.innerHTML = '<p class="lede">Venues will be announced soon. Jay Mataji!</p>'; return; }
-    box.innerHTML = catalogue.map((v) => {
-      const sale = v.passes.filter((p) => !p.past);
-      const bookable = sale.filter((p) => p.bookable);
-      const from = bookable.length ? Math.min(...bookable.map((p) => p.price)) : null;
-      const qty = sale.reduce((s, p) => s + p.quantity, 0);
-      const left = sale.reduce((s, p) => s + p.available, 0);
-      const pct = qty ? Math.round((left / qty) * 100) : 0;
-      const dated = sale.map((p) => p.date).filter(Boolean).sort();
-      const range = dated.length ? `${dateParts(dated[0]).d} ${dateParts(dated[0]).m} – ${dateParts(dated[dated.length - 1]).d} ${dateParts(dated[dated.length - 1]).m}` : '';
-      const availLabel = !qty ? 'Passes coming soon' : left === 0 ? 'Sold out' : pct < 25 ? `Filling fast — only ${pct}% left` : pct < 60 ? `${pct}% of passes left` : 'Plenty of passes available';
-      return `<article class="venue">
-        <div class="ph">${v.image ? `<img src="${esc(v.image)}" alt="" loading="lazy">` : ''}
-          ${from != null ? `<span class="from">from <b>${inr(from)}</b></span>` : ''}</div>
-        <div class="bd">
-          <h3>${esc(v.name)}</h3>
-          ${v.name_gu ? `<p class="gu">${esc(v.name_gu)}</p>` : ''}
-          <p class="meta">${range ? `<span>📅 ${esc(range)}</span>` : ''}${v.start_time ? `<span>🕗 ${esc(v.start_time)}</span>` : ''}${v.city ? `<span>📍 ${esc(v.city)}</span>` : ''}</p>
-          ${v.description ? `<p class="desc">${esc(v.description)}</p>` : ''}
-          <div class="avail" aria-hidden="true"><i style="width:${pct}%"></i></div>
-          <p class="avail-l">${availLabel}</p>
-          <div class="act">
-            <a class="btn sm" href="/book?venue=${encodeURIComponent(v.id)}">${bookable.length ? 'Book here' : 'See passes'}</a>
-            ${v.map_url ? `<a class="btn ghost sm" href="${esc(v.map_url)}" target="_blank" rel="noopener">Map</a>` : ''}
-          </div>
+  /* One ground — ours. Its details come from the settings an admin edits; the
+     availability bar comes from the nights still on sale. */
+  function renderGround(cfg, cat) {
+    const box = $('#groundCard');
+    if (!cat || !cfg) { box.innerHTML = '<p class="lede">Couldn’t load the details just now. <a href="/book" style="color:var(--marigold)">Open the booking page</a>.</p>'; return; }
+    const sale = nights.filter((n) => !n.past);
+    const bookable = sale.filter((n) => n.bookable);
+    const qty = sale.reduce((s, n) => s + n.quantity, 0);
+    const left = sale.reduce((s, n) => s + n.available, 0);
+    const pct = qty ? Math.round((left / qty) * 100) : 0;
+    const dated = sale.map((n) => n.date).sort();
+    const range = dated.length
+      ? `${dateParts(dated[0]).d} ${dateParts(dated[0]).m} – ${dateParts(dated[dated.length - 1]).d} ${dateParts(dated[dated.length - 1]).m}`
+      : '';
+    const availLabel = !qty ? 'Passes coming soon' : left === 0 ? 'Sold out' : pct < 25 ? `Filling fast — only ${pct}% left` : pct < 60 ? `${pct}% of passes left` : 'Plenty of passes available';
+    box.innerHTML = `<article class="ground">
+      <div class="ph">${cfg.venue_photo ? `<img src="${esc(cfg.venue_photo)}" alt="" loading="lazy">` : ''}
+        ${price ? `<span class="from"><b>${inr(price)}</b> per night</span>` : ''}</div>
+      <div class="bd">
+        <h3>${esc(cfg.site_name || 'Mavladi Mandli')}</h3>
+        ${cfg.site_name_gu ? `<p class="gu">${esc(cfg.site_name_gu)}</p>` : ''}
+        <p class="meta">${range ? `<span>📅 ${esc(range)}</span>` : ''}${cfg.event_time_text ? `<span>🕗 ${esc(cfg.event_time_text)}</span>` : ''}${cfg.venue_address ? `<span>📍 ${esc(cfg.venue_address)}</span>` : ''}</p>
+        <p class="desc">One ${esc(PASS)} admits one person for one night. Pick the nights you want — ${bookable.length ? `${bookable.length} of them are open right now` : 'booking opens soon'}.</p>
+        <div class="avail" aria-hidden="true"><i style="width:${pct}%"></i></div>
+        <p class="avail-l">${availLabel}</p>
+        <div class="act">
+          <a class="btn sm" href="/book">${bookable.length ? 'Book your nights' : 'See the nights'}</a>
+          ${cfg.venue_map_url ? `<a class="btn ghost sm" href="${esc(cfg.venue_map_url)}" target="_blank" rel="noopener">Map</a>` : ''}
         </div>
-      </article>`;
-    }).join('');
+      </div>
+    </article>`;
     box.querySelectorAll('img').forEach((img) => img.addEventListener('load', requestLayout, { once: true }));
   }
 

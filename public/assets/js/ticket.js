@@ -1,7 +1,7 @@
 /* Ticket page: pay → upload proof → wait for verification → e-pass. */
 (function () {
   'use strict';
-  const { q, m, a, watch, upload, qr, fns, esc, inr, dateLong, when, toast, mine, statusPill, busy } = window.MV;
+  const { q, m, a, watch, upload, qr, fns, esc, inr, dateLong, when, PASS, toast, mine, statusPill, busy } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const view = $('#view');
 
@@ -49,7 +49,7 @@
   }
 
   function itemsHtml(b) {
-    return `<ul class="itemlist">${b.items.map((i) => `<li><span>${i.qty} × ${esc(i.label)}<small>${esc(i.date ? dateLong(i.date) : 'All nine nights')} · ${esc(i.venue)}</small></span><b>${inr(i.qty * i.unit_price)}</b></li>`).join('')}</ul>`;
+    return `<ul class="itemlist">${b.items.map((i) => `<li><span>${i.qty} × ${esc(PASS)}<small>${esc(dateLong(i.date))}</small></span><b>${inr(i.qty * i.unit_price)}</b></li>`).join('')}</ul>`;
   }
 
   function render() {
@@ -225,7 +225,7 @@
   /* ---------------- the e-pass ---------------- */
   function renderPass(b) {
     head('જય માતાજી', 'Your pass is confirmed', 'Show this QR code at the gate.');
-    const nights = b.items.filter((i) => i.date).map((i) => i.date);
+    const nights = new Set(b.items.map((i) => i.date));
     view.innerHTML = `
       <article class="pass" aria-label="E-pass ${esc(b.code)}">
         <div class="ph">
@@ -241,7 +241,7 @@
           <div class="perf" aria-hidden="true"></div>
           <div class="qr"><img src="${esc(qr(`${location.origin}/admin/#checkin/${b.code}`, { ec: 'Q' }))}" alt="Entry QR code for booking ${esc(b.code)}" width="230" height="230"></div>
         </div>
-        <p class="foot">Verified ${esc(when(b.verified_at))}${b.items.some((i) => !i.date) ? ' · valid all nights' : nights.length ? ` · valid for ${new Set(nights).size} night${new Set(nights).size > 1 ? 's' : ''}` : ''}<br>Non-transferable · traditional attire please</p>
+        <p class="foot">Verified ${esc(when(b.verified_at))}${nights.size ? ` · valid for ${nights.size} night${nights.size > 1 ? 's' : ''}` : ''}<br>Non-transferable · traditional attire please</p>
       </article>
       <div class="noprint" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
         <button class="btn" type="button" id="printBtn">Save / print pass</button>

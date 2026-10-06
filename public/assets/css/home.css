@@ -142,31 +142,31 @@ body.home { background: var(--night); color: var(--gold-soft); overflow-x: hidde
   .nights { grid-template-columns: repeat(3, 1fr); }
 }
 
-/* venues */
-.venues { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 22px; text-align: left; margin-top: 6px; }
-.venue {
-  position: relative; overflow: hidden; border-radius: 18px; background: var(--paper); color: var(--ink);
+/* the ground — there is one, so the card is centred rather than in a grid */
+.grounds { display: grid; justify-content: center; text-align: left; margin-top: 6px; }
+.ground {
+  max-width: 520px; position: relative; overflow: hidden; border-radius: 18px; background: var(--paper); color: var(--ink);
   box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(217, 165, 76, 0.5);
   display: flex; flex-direction: column;
 }
-.venue .ph { aspect-ratio: 16 / 9; overflow: hidden; position: relative; background: var(--maroon-800); }
-.venue .ph img { width: 100%; height: 100%; object-fit: cover; transition: transform 1.2s var(--ease); }
-.venue:hover .ph img { transform: scale(1.05); }
-.venue .ph .from {
+.ground .ph { aspect-ratio: 16 / 9; overflow: hidden; position: relative; background: var(--maroon-800); }
+.ground .ph img { width: 100%; height: 100%; object-fit: cover; transition: transform 1.2s var(--ease); }
+.ground:hover .ph img { transform: scale(1.05); }
+.ground .ph .from {
   position: absolute; right: 12px; bottom: 12px; padding: 6px 12px; border-radius: 999px;
   background: rgba(22, 3, 4, 0.78); color: var(--gold-soft); font-size: 0.85rem; backdrop-filter: blur(4px);
 }
-.venue .ph .from b { color: #fff; font-size: 1rem; }
-.venue .bd { padding: 18px 20px 20px; display: grid; gap: 8px; flex: 1; }
-.venue h3 { font-family: var(--f-display); font-size: 1.6rem; color: var(--maroon-700); font-weight: 700; }
-.venue .gu { color: var(--red); font-size: 1.05rem; margin-top: -4px; }
-.venue .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.88rem; color: var(--ink-2); }
-.venue .meta span { display: inline-flex; gap: 6px; align-items: center; }
-.venue p.desc { color: var(--ink-2); font-size: 0.95rem; }
-.venue .avail { height: 6px; border-radius: 6px; background: var(--parchment-2); overflow: hidden; margin-top: 4px; }
-.venue .avail i { display: block; height: 100%; background: linear-gradient(90deg, var(--saffron), var(--red)); border-radius: inherit; }
-.venue .avail-l { font-size: 0.8rem; color: var(--ink-3); }
-.venue .act { display: flex; gap: 10px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.ground .ph .from b { color: #fff; font-size: 1rem; }
+.ground .bd { padding: 18px 20px 20px; display: grid; gap: 8px; flex: 1; }
+.ground h3 { font-family: var(--f-display); font-size: 1.6rem; color: var(--maroon-700); font-weight: 700; }
+.ground .gu { color: var(--red); font-size: 1.05rem; margin-top: -4px; }
+.ground .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.88rem; color: var(--ink-2); }
+.ground .meta span { display: inline-flex; gap: 6px; align-items: center; }
+.ground p.desc { color: var(--ink-2); font-size: 0.95rem; }
+.ground .avail { height: 6px; border-radius: 6px; background: var(--parchment-2); overflow: hidden; margin-top: 4px; }
+.ground .avail i { display: block; height: 100%; background: linear-gradient(90deg, var(--saffron), var(--red)); border-radius: inherit; }
+.ground .avail-l { font-size: 0.8rem; color: var(--ink-3); }
+.ground .act { display: flex; gap: 10px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
 
 /* how it works */
 .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-top: 8px; counter-reset: s; }

@@ -61,8 +61,8 @@
   /* dates are stored as YYYY-MM-DD and always mean an evening in India */
   const asDate = (iso) => new Date(iso + 'T12:00:00+05:30');
   const fmt = (iso, o) => asDate(iso).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', ...o });
-  const dateLong = (iso) => (iso ? fmt(iso, { weekday: 'long', day: 'numeric', month: 'long' }) : 'All nine nights');
-  const dateShort = (iso) => (iso ? fmt(iso, { weekday: 'short', day: 'numeric', month: 'short' }) : 'Season');
+  const dateLong = (iso) => fmt(iso, { weekday: 'long', day: 'numeric', month: 'long' });
+  const dateShort = (iso) => fmt(iso, { weekday: 'short', day: 'numeric', month: 'short' });
   const dateParts = (iso) => ({
     wd: fmt(iso, { weekday: 'short' }),
     d: fmt(iso, { day: 'numeric' }),
@@ -71,6 +71,9 @@
   const when = (ts) => ts
     ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
     : '';
+
+  /* There is one ground and one kind of pass; this is what it is called. */
+  const PASS = 'Garba Pass';
 
   /* Navadurga — the form of the Goddess worshipped on each night */
   const NAVDURGA = [
@@ -140,5 +143,5 @@
   let cfgPromise;
   const config = () => (cfgPromise ||= q(fns.public.config));
 
-  w.MV = { q, m, a, watch, upload, secret, qr, fns, esc, inr, dateLong, dateShort, dateParts, when, NAVDURGA, toast, mine, STATUS, statusPill, busy, config };
+  w.MV = { q, m, a, watch, upload, secret, qr, fns, esc, inr, dateLong, dateShort, dateParts, when, PASS, NAVDURGA, toast, mine, STATUS, statusPill, busy, config };
 })(window);

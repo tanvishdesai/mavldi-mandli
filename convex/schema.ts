@@ -7,7 +7,7 @@ import { v } from "convex/values";
      pending -> rejected | awaiting_payment (re-upload asked)
      confirmed -> cancelled
    Stock is held while a booking is awaiting_payment, pending or confirmed;
-   each pass keeps running `held` / `sold` counters so availability is one read. */
+   each night keeps running `held` / `sold` counters so availability is one read. */
 export const bookingStatus = v.union(
   v.literal("awaiting_payment"),
   v.literal("pending"),
@@ -17,52 +17,30 @@ export const bookingStatus = v.union(
   v.literal("expired"),
 );
 
+/* One line of a booking: n passes for one night. There is a single ground and a
+   single kind of pass, so a line needs only the night and what it cost — the
+   price is snapshotted so changing it later doesn't rewrite history. */
 export const bookingItem = v.object({
   passId: v.id("passes"),
-  venueId: v.id("venues"),
+  date: v.string(), // YYYY-MM-DD
   qty: v.number(),
   unitPrice: v.number(),
-  admits: v.number(),
-  // snapshot so history survives edits
-  venueName: v.string(),
-  passLabel: v.string(),
-  passDate: v.union(v.string(), v.null()), // YYYY-MM-DD, null = season pass
 });
 
 export default defineSchema({
   settings: defineTable({ key: v.string(), value: v.string() }).index("by_key", ["key"]),
 
-  venues: defineTable({
-    name: v.string(),
-    nameGu: v.optional(v.string()),
-    city: v.optional(v.string()),
-    address: v.optional(v.string()),
-    mapUrl: v.optional(v.string()),
-    description: v.optional(v.string()),
-    image: v.optional(v.string()),
-    startTime: v.optional(v.string()),
-    active: v.boolean(),
-    sort: v.number(),
-  }),
-
+  /* One row per night of the event: the stock for that night. */
   passes: defineTable({
-    venueId: v.id("venues"),
-    date: v.union(v.string(), v.null()),
-    label: v.string(),
-    description: v.optional(v.string()),
-    price: v.number(),
+    date: v.string(), // YYYY-MM-DD
     quantity: v.number(),
-    maxPerBooking: v.number(),
-    admits: v.number(),
     active: v.boolean(),
-    sort: v.number(),
     held: v.number(), // awaiting_payment + pending + confirmed
     sold: v.number(), // confirmed only
-    // awaiting_payment only: nobody has paid for these yet, so a flood of them is
-    // how you deny the whole event its stock. Capped per pass in createBooking.
-    // Optional so existing rows need no migration; absent reads as 0.
-    unpaid: v.optional(v.number()),
-  }).index("by_venue", ["venueId"]),
+    /* awaiting_payment only: nobody has paid for these yet, so a flood of them is
+       how you deny the night its stock. Capped per night in createBooking. */
+    unpaid: v.number(),
+  }).index("by_date", ["date"]),
 
   bookings: defineTable({
     code: v.string(),
@@ -90,7 +68,7 @@ export default defineSchema({
     .index("by_utr", ["utr"])
     .searchIndex("search", { searchField: "searchText", filterFields: ["status"] }),
 
-  // one row per night a booking was admitted (season passes come every night)
+  // one row per night a booking was admitted
   checkins: defineTable({ bookingId: v.id("bookings"), night: v.string(), at: v.number() })
     .index("by_booking", ["bookingId", "night"])
     .index("by_night", ["night"]),

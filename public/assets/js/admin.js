@@ -2,7 +2,7 @@
    Every call carries the session token that auth.login registered. */
 (function () {
   'use strict';
-  const { q, m, a, watch, upload, secret, fns, esc, inr, dateShort, when, toast, statusPill, busy, STATUS } = window.MV;
+  const { q, m, a, watch, upload, secret, fns, esc, inr, dateShort, when, PASS, toast, statusPill, busy, STATUS } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const app = $('#app');
@@ -24,16 +24,14 @@
     dashboard: '<path d="M3 13h8V3H3zM13 21h8V11h-8zM3 21h8v-6H3zM13 3v6h8V3z"/>',
     bookings: '<path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v4a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-4a2 2 0 0 0 0-4z"/>',
     checkin: '<path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/>',
-    venues: '<path d="M12 21s-7-6.2-7-11a7 7 0 1 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
     passes: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/>',
     faqs: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17h.01"/>',
     settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   };
   const icon = (n) => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[n]}</svg>`;
-  const NAV = [['dashboard', 'Dashboard'], ['bookings', 'Bookings'], ['checkin', 'Gate check-in'], ['venues', 'Venues'], ['passes', 'Passes & dates'], ['faqs', 'FAQs'], ['settings', 'Settings']];
+  const NAV = [['dashboard', 'Dashboard'], ['bookings', 'Bookings'], ['checkin', 'Gate check-in'], ['passes', 'Nights & stock'], ['faqs', 'FAQs'], ['settings', 'Settings']];
 
   let me = { admin: false };
-  let venuesCache = [];
   let pendingCount = 0;
 
   async function boot() {
@@ -98,7 +96,6 @@
       document.title = (pendingCount ? `(${pendingCount}) ` : '') + 'Admin — Mavladi Mandli';
     });
   }
-  const refreshBadge = () => {};
 
   function route() {
     const [k, arg] = (location.hash.slice(1) || 'dashboard').split('/');
@@ -107,17 +104,12 @@
     const stay = (k === 'bookings' || k === 'booking') && $('#blist');
     if (!stay) { pane.dataset.view = ''; dropLive(); }
     if (k !== 'booking') closeDrawerQuiet();
-    const views = { dashboard, bookings, booking: (p, id) => { bookings(p); openBooking(id); }, checkin, venues, passes, faqs, settings };
+    const views = { dashboard, bookings, booking: (p, id) => { bookings(p); openBooking(id); }, checkin, passes, faqs, settings };
     (views[k] || dashboard)(pane, arg && decodeURIComponent(arg));
   }
 
   const head = (title, sub, acts = '') => `<div class="phead"><div><h1>${title}</h1>${sub ? `<p class="sub">${sub}</p>` : ''}</div><div class="acts">${acts}</div></div>`;
   const fail = (pane, e) => { pane.insertAdjacentHTML('beforeend', `<div class="notice bad">${esc(e.message)}</div>`); };
-
-  async function getVenues() {
-    venuesCache = await Q(F.venues);
-    return venuesCache;
-  }
 
   /* ================= dashboard ================= */
   function dashboard(pane) {
@@ -126,19 +118,17 @@
   }
   function drawDashboard(pane, s) {
     if (s.empty) {
-      pane.innerHTML = head('Welcome 🙏', 'Your database is empty') + `<div class="panel2"><div class="pad" style="display:grid;gap:12px;justify-items:start">
-        <p>Start by adding a venue and its passes, or load the sample data (2 venues, 9 nights, FAQs) and edit it.</p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="sample" type="button">Load sample data</button><a class="btn ghost sm" href="#venues">Add a venue</a></div></div></div>`;
+      pane.innerHTML = head('Welcome 🙏', 'No nights are set up yet') + `<div class="panel2"><div class="pad" style="display:grid;gap:12px;justify-items:start">
+        <p>Add the nights you are selling passes for, or load the sample data (nine nights of Navratri 2026 plus FAQs) and edit it. The pass price lives in Settings.</p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="sample" type="button">Load sample data</button><a class="btn ghost sm" href="#passes">Add nights</a></div></div></div>`;
       $('#sample').onclick = async (e) => { busy(e.target, true, 'Loading…'); try { await M(F.loadSampleData); toast('Sample data loaded', 'ok'); } catch (x) { busy(e.target, false); toast(x.message, 'bad'); } };
       return;
     }
     const st = (k) => s.byStatus.find((x) => x.status === k) || { n: 0, amount: 0 };
     const soldQty = s.inventory.reduce((a, i) => a + i.confirmed, 0);
     const heldQty = s.inventory.reduce((a, i) => a + i.held, 0);
-    const byVenue = new Map();
-    for (const i of s.inventory) { if (!byVenue.has(i.venue)) byVenue.set(i.venue, []); byVenue.get(i.venue).push(i); }
     const def = me.default_password ? `<div class="notice bad" style="margin-bottom:16px">⚠ You are still using the default admin password. <a href="#settings">Change it now</a>.</div>` : '';
-    pane.innerHTML = head('Dashboard', `Today is ${esc(dateShort(s.today))} · updates live`, '<a class="btn sm" href="#bookings">Open verification queue</a>') + def + `
+    pane.innerHTML = head('Dashboard', `Today is ${esc(dateShort(s.today))} · ${inr(s.price)} per pass · updates live`, '<a class="btn sm" href="#bookings">Open verification queue</a>') + def + `
       <div class="tiles">
         <a class="tile hot" href="#bookings"><span>Waiting for verification</span><b>${st('pending').n}</b><small>${inr(st('pending').amount)} to check</small></a>
         <div class="tile"><span>Confirmed revenue</span><b>${inr(st('confirmed').amount)}</b><small>${st('confirmed').n} bookings</small></div>
@@ -150,35 +140,31 @@
       <div class="panel2"><h2>Next to verify <a class="iconbtn" href="#bookings">See all</a></h2>
         ${s.pending_queue.length ? `<div class="tbl-wrap"><table class="tbl"><tbody>${s.pending_queue.map((b) => `<tr class="click" data-id="${b.id}"><td class="mono">${esc(b.code)}</td><td>${esc(b.name)}</td><td class="num">${inr(b.amount)}</td><td class="muted sm">paid ${esc(when(b.paid_at))}</td></tr>`).join('')}</tbody></table></div>` : '<div class="empty-state">Nothing waiting. 🪔</div>'}
       </div>
-      ${[...byVenue].map(([v, rows]) => `<div class="panel2"><h2>${esc(v)} — inventory</h2><div class="tbl-wrap"><table class="tbl">
-        <thead><tr><th>Night</th><th>Pass</th><th class="num">Price</th><th class="num">Confirmed</th><th class="num">Held</th><th class="num">Left</th><th>Fill</th></tr></thead><tbody>
-        ${rows.map((i) => { const pct = i.quantity ? Math.round((i.held / i.quantity) * 100) : 0; return `<tr class="${i.active ? '' : 'inactive'}"><td>${esc(dateShort(i.date))}</td><td>${esc(i.label)}</td><td class="num">${inr(i.price)}</td><td class="num">${i.confirmed}</td><td class="num">${i.held}</td><td class="num">${i.quantity - i.held} / ${i.quantity}</td><td><div class="bar"><i class="${pct > 80 ? 'hi' : ''}" style="width:${pct}%"></i></div></td></tr>`; }).join('')}
-        </tbody></table></div></div>`).join('')}`;
+      <div class="panel2"><h2>Night by night <a class="iconbtn" href="#passes">Edit stock</a></h2><div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>Night</th><th class="num">Confirmed</th><th class="num">Unpaid holds</th><th class="num">Held</th><th class="num">Left</th><th>Fill</th></tr></thead><tbody>
+        ${s.inventory.map((i) => { const pct = i.quantity ? Math.round((i.held / i.quantity) * 100) : 0; return `<tr class="${i.active ? '' : 'inactive'}"><td>${esc(dateShort(i.date))}${i.active ? '' : ' <span class="pill mute">off sale</span>'}</td><td class="num">${i.confirmed}</td><td class="num">${i.unpaid}</td><td class="num">${i.held}</td><td class="num">${i.quantity - i.held} / ${i.quantity}</td><td><div class="bar"><i class="${pct > 80 ? 'hi' : ''}" style="width:${pct}%"></i></div></td></tr>`; }).join('')}
+        </tbody></table></div></div>`;
     pane.querySelectorAll('tr[data-id]').forEach((tr) => tr.onclick = () => { location.hash = `booking/${tr.dataset.id}`; });
   }
 
   /* ================= bookings ================= */
-  const bstate = { status: 'pending', venue: '', date: '', q: '', limit: 50 };
+  const bstate = { status: 'pending', date: '', q: '', limit: 50 };
   let lastRows = [];
   async function bookings(pane) {
     if (pane.dataset.view === 'bookings') return loadBookings();
     pane.dataset.view = 'bookings';
-    await getVenues().catch(() => []);
     const tabs = [['pending', 'To verify'], ['awaiting_payment', 'Awaiting payment'], ['confirmed', 'Confirmed'], ['rejected', 'Rejected'], ['expired', 'Expired'], ['cancelled', 'Cancelled'], ['', 'All']];
     pane.innerHTML = head('Bookings', 'Verify payments, confirm passes, manage every booking',
       '<button class="btn ghost sm" id="csvBtn" type="button">Export CSV</button><button class="btn sm" id="newBk" type="button">+ Counter booking</button>') + `
       <div class="tabs" id="btabs">${tabs.map(([k, l]) => `<button type="button" data-s="${k}" class="${bstate.status === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div class="filters">
         <input class="input" id="bq" type="search" placeholder="Search code, name, phone, UTR…" value="${esc(bstate.q)}">
-        <select class="input" id="bv"><option value="">All venues</option>${venuesCache.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select>
-        <input class="input" id="bd" type="date" value="${esc(bstate.date)}" title="Pass date">
+        <input class="input" id="bd" type="date" value="${esc(bstate.date)}" title="Only bookings that include this night">
       </div>
       <div class="panel2" id="blist"><div class="empty-state">Loading…</div></div>`;
-    $('#bv').value = bstate.venue;
     $('#btabs').onclick = (e) => { const b = e.target.closest('button'); if (!b) return; bstate.status = b.dataset.s; bstate.limit = 50; $$('#btabs button').forEach((x) => x.classList.toggle('on', x === b)); loadBookings(); };
     let tq;
     $('#bq').oninput = (e) => { clearTimeout(tq); tq = setTimeout(() => { bstate.q = e.target.value.trim(); bstate.limit = 50; loadBookings(); }, 250); };
-    $('#bv').onchange = (e) => { bstate.venue = e.target.value; bstate.limit = 50; loadBookings(); };
     $('#bd').onchange = (e) => { bstate.date = e.target.value; bstate.limit = 50; loadBookings(); };
     $('#csvBtn').onclick = (e) => exportCsv(e.target);
     $('#newBk').onclick = counterBooking;
@@ -190,7 +176,7 @@
     if (!box) return;
     if (listUnsub) listUnsub();
     const args = {
-      token, status: bstate.status || undefined, venueId: bstate.venue || undefined, date: bstate.date || undefined,
+      token, status: bstate.status || undefined, date: bstate.date || undefined,
       q: bstate.q || undefined, paginationOpts: { numItems: bstate.limit, cursor: null },
     };
     listUnsub = watch(F.listBookings, args, (res) => drawBookings(box, res), (e) => { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; });
@@ -199,11 +185,11 @@
   function drawBookings(box, res) {
     lastRows = res.page;
     if (!res.page.length && res.isDone) { box.innerHTML = `<div class="empty-state">${bstate.status === 'pending' ? 'No payments waiting for verification. 🪔' : 'No bookings match.'}</div>`; return; }
-    box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Guest</th><th>Passes</th><th class="num">Amount</th><th>UTR</th><th>Status</th><th>${bstate.status === 'pending' ? 'Paid' : 'Created'}</th></tr></thead><tbody>
+    box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Guest</th><th>Nights</th><th class="num">Amount</th><th>UTR</th><th>Status</th><th>${bstate.status === 'pending' ? 'Paid' : 'Created'}</th></tr></thead><tbody>
       ${res.page.map((b) => `<tr class="click" data-id="${b.id}">
         <td class="mono">${esc(b.code)}${b.source === 'counter' ? ' <span class="pill mute">counter</span>' : ''}</td>
         <td>${esc(b.name)}<div class="muted sm">${esc(b.phone)}</div></td>
-        <td class="sm">${b.items.map((i) => `${i.qty}× ${esc(i.pass_label)} <span class="muted">${esc(dateShort(i.pass_date))}</span>`).join('<br>')}</td>
+        <td class="sm">${b.items.map((i) => `${i.qty}× <span class="muted">${esc(dateShort(i.date))}</span>`).join('<br>')}</td>
         <td class="num">${inr(b.amount)}</td>
         <td class="mono sm">${esc(b.utr || '—')}${b.screenshot ? ' 🖼' : ''}</td>
         <td>${statusPill(b.status)}${b.checked_in_at ? ' <span class="pill ok">in</span>' : ''}</td>
@@ -230,8 +216,7 @@
       }
       const qq = bstate.q.toLowerCase();
       const rows = all.filter((b) => (!bstate.status || b.status === bstate.status)
-        && (!bstate.venue || b.items.some((i) => i.venue_id === bstate.venue))
-        && (!bstate.date || b.items.some((i) => i.pass_date === bstate.date))
+        && (!bstate.date || b.items.some((i) => i.date === bstate.date))
         && (!qq || [b.code, b.name, b.phone, b.utr, b.email].join(' ').toLowerCase().includes(qq)));
       const cell = (v) => {
         const t = v == null ? '' : String(v);
@@ -239,11 +224,11 @@
         return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
       };
       const iso = (ts) => (ts ? new Date(ts).toISOString() : '');
-      const head = ['code', 'status', 'name', 'phone', 'email', 'amount', 'utr', 'passes', 'admits', 'source', 'created_at', 'paid_at', 'verified_at', 'last_checkin_at', 'admin_note', 'customer_note'];
+      const head = ['code', 'status', 'name', 'phone', 'email', 'amount', 'utr', 'nights', 'passes', 'source', 'created_at', 'paid_at', 'verified_at', 'last_checkin_at', 'admin_note', 'customer_note'];
       const lines = [head.join(',')].concat(rows.map((b) => [
         b.code, b.status, b.name, b.phone, b.email, b.amount, b.utr,
-        b.items.map((i) => `${i.qty}x ${i.venue_name} / ${i.pass_label} / ${i.pass_date || 'Season'}`).join('; '),
-        b.items.reduce((s2, i) => s2 + i.qty * i.admits, 0), b.source,
+        b.items.map((i) => `${i.qty}x ${i.date}`).join('; '),
+        b.items.reduce((s2, i) => s2 + i.qty, 0), b.source,
         iso(b.created_at), iso(b.paid_at), iso(b.verified_at), iso(b.checked_in_at), b.admin_note, b.customer_note,
       ].map(cell).join(',')));
       const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -294,7 +279,7 @@
     current = b;
     b.ticket_url = `${location.origin}/ticket?code=${encodeURIComponent(b.code)}&t=${encodeURIComponent(b.secret)}`;
     const shot = b.screenshot_url;
-    const admits = b.items.reduce((s, i) => s + i.qty * i.admits, 0);
+    const admits = b.items.reduce((s, i) => s + i.qty, 0);
     const waMsg = b.status === 'confirmed'
       ? `Jay Mataji ${b.name.split(' ')[0]}! 🙏 Your Mavladi Mandli booking ${b.code} is CONFIRMED. Your e-pass (show the QR at the gate): ${b.ticket_url}`
       : b.status === 'rejected'
@@ -318,7 +303,7 @@
             <p class="muted sm">Match the amount and UTR against your bank / UPI app statement before confirming.</p>
           </div>
           <div class="dsec"><h3>Passes · admits ${admits}</h3>
-            <ul class="itemlist" style="list-style:none;margin:0;padding:0;display:grid;gap:6px">${b.items.map((i) => `<li style="display:flex;justify-content:space-between;gap:10px"><span>${i.qty} × ${esc(i.pass_label)} <span class="muted">· ${esc(dateShort(i.pass_date))} · ${esc(i.venue_name)}</span></span><b>${inr(i.qty * i.unit_price)}</b></li>`).join('')}</ul>
+            <ul class="itemlist" style="list-style:none;margin:0;padding:0;display:grid;gap:6px">${b.items.map((i) => `<li style="display:flex;justify-content:space-between;gap:10px"><span>${i.qty} × ${esc(PASS)} <span class="muted">· ${esc(dateShort(i.date))}</span></span><b>${inr(i.qty * i.unit_price)}</b></li>`).join('')}</ul>
             ${b.checkins.length ? `<p class="sm">Checked in: ${b.checkins.map((c) => `${esc(dateShort(c.night))} ${esc(when(c.at).split(', ').pop())}`).join(' · ')}</p>` : ''}
           </div>
           <div class="dsec"><h3>Guest <button class="iconbtn" type="button" id="editG" style="float:right">Edit</button></h3>
@@ -409,13 +394,13 @@
 
   function counterBooking() {
     Q(F.passes).then((ps) => {
-      const opts = ps.filter((p) => p.active).map((p) => ({ v: p.id, l: `${p.venue_name} · ${dateShort(p.date)} · ${p.label} · ${inr(p.price)} (${p.quantity - p.held} left)` }));
+      const opts = ps.filter((p) => p.active).map((p) => ({ v: p.id, l: `${dateShort(p.date)} — ${p.quantity - p.held} left` }));
       formModal({
         title: 'Counter / manual booking',
-        intro: 'For cash or offline sales. Stock is checked; it is marked confirmed unless you choose otherwise.',
+        intro: 'For cash or offline sales. Stock is checked; it is marked confirmed unless you choose otherwise. The price is the one in Settings.',
         fields: [
-          { name: 'pass', label: 'Pass', type: 'select', options: opts, required: true, full: true },
-          { name: 'qty', label: 'Quantity', type: 'number', min: 1, required: true },
+          { name: 'pass', label: 'Night', type: 'select', options: opts, required: true, full: true },
+          { name: 'qty', label: 'Passes', type: 'number', min: 1, required: true },
           { name: 'status', label: 'Status', type: 'select', options: [{ v: 'confirmed', l: 'Confirmed (paid)' }, { v: 'pending', l: 'Pending verification' }] },
           { name: 'name', label: 'Guest name', required: true },
           { name: 'phone', label: 'Phone', required: true },
@@ -479,10 +464,10 @@
     let b;
     try { b = await Q(F.checkinLookup, { code }); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
     if (!b) { box.innerHTML = '<div class="verdict bad"><h2>✕ Not found</h2><p>No booking with that code.</p></div>'; return; }
-    const admits = b.items.reduce((s, i) => s + i.qty * i.admits, 0);
+    const admits = b.items.reduce((s, i) => s + i.qty, 0);
     const tonight = b.checkins.find((c) => c.night === b.night);
-    const validTonight = b.items.some((i) => i.pass_date == null || i.pass_date === b.night);
-    const items = `<ul>${b.items.map((i) => `<li>${i.qty} × ${esc(i.pass_label)} · ${esc(dateShort(i.pass_date))} · ${esc(i.venue_name)}</li>`).join('')}</ul>`;
+    const validTonight = b.items.some((i) => i.date === b.night);
+    const items = `<ul>${b.items.map((i) => `<li>${i.qty} × ${esc(PASS)} · ${esc(dateShort(i.date))}</li>`).join('')}</ul>`;
     let cls, title, btn = '';
     if (b.status !== 'confirmed') { cls = 'bad'; title = `✕ Not confirmed (${esc((STATUS[b.status] || [b.status])[0])})`; }
     else if (tonight) { cls = 'warn'; title = `Already checked in at ${esc(when(tonight.at).split(', ').pop())}`; }
@@ -503,137 +488,77 @@
   }
   addEventListener('hashchange', () => { if (!location.hash.startsWith('#checkin')) stopScan(); });
 
-  /* ================= venues ================= */
-  async function venues(pane) {
-    pane.dataset.view = 'venues';
-    pane.innerHTML = head('Venues', 'The grounds you sell passes for', '<button class="btn sm" id="addV" type="button">+ Add venue</button>') + '<div id="vbox" class="vgrid"></div>';
-    $('#addV').onclick = () => venueForm();
-    let vs;
-    try { vs = await getVenues(); } catch (e) { return fail(pane, e); }
-    $('#vbox').innerHTML = vs.length ? vs.map((v) => `<article class="vcard">
-      ${v.image ? `<img src="${esc(v.image)}" alt="">` : '<img alt="">'}
-      <div class="b"><h3>${esc(v.name)} ${v.active ? '' : '<span class="pill mute">hidden</span>'}</h3>
-        <p class="muted sm">${esc([v.nameGu, v.city, v.startTime].filter(Boolean).join(' · '))}</p>
-        <p class="sm">${v.pass_count} pass line${v.pass_count === 1 ? '' : 's'}</p>
-        <div class="a"><button class="iconbtn" data-e="${v.id}">Edit</button><a class="iconbtn" href="#passes" data-p="${v.id}">Passes</a><button class="iconbtn danger" data-d="${v.id}">Delete</button></div></div></article>`).join('')
-      : '<div class="empty-state">No venues yet. Add your first ground.</div>';
-    $('#vbox').onclick = async (e) => {
-      const t = e.target;
-      if (t.dataset.e) venueForm(vs.find((v) => v.id === t.dataset.e));
-      if (t.dataset.p) pstate.venue = t.dataset.p;
-      if (t.dataset.d) {
-        const v = vs.find((x) => x.id === t.dataset.d);
-        if (!confirm(`Delete “${v.name}” and all its passes?`)) return;
-        try { await M(F.deleteVenue, { id: v.id }); toast('Venue deleted'); venues(pane); } catch (ex) { toast(ex.message, 'bad'); }
-      }
-    };
-  }
-  function venueForm(v) {
-    formModal({
-      title: v ? 'Edit venue' : 'Add venue',
-      fields: [
-        { name: 'name', label: 'Name', required: true, full: true },
-        { name: 'nameGu', label: 'Name in Gujarati' }, { name: 'city', label: 'City' },
-        { name: 'address', label: 'Address', full: true },
-        { name: 'mapUrl', label: 'Google Maps link', full: true, placeholder: 'https://maps.app.goo.gl/…' },
-        { name: 'startTime', label: 'Timing', placeholder: '8:30 pm onwards' }, { name: 'sort', label: 'Order', type: 'number' },
-        { name: 'description', label: 'Short description', type: 'textarea', full: true },
-        { name: 'image', label: 'Photo', type: 'image', full: true },
-        { name: 'active', label: 'Show on the website', type: 'switch', full: true },
-      ],
-      values: v || { active: true, sort: 0 },
-      submit: async (val) => {
-        await M(F.saveVenue, { ...(v ? { id: v.id } : {}), ...val });
-        toast('Venue saved', 'ok');
-        venues($('#pane'));
-      },
-    });
-  }
-
-  /* ================= passes ================= */
-  const pstate = { venue: '' };
+  /* ================= nights & stock ================= */
+  /* One ground and one pass type, so the only thing to manage per night is how
+     many passes exist and whether they are on sale. The price is in Settings. */
   async function passes(pane) {
     pane.dataset.view = 'passes';
-    let vs;
-    try { vs = await getVenues(); } catch (e) { return fail(pane, e); }
-    if (!pstate.venue && vs[0]) pstate.venue = String(vs[0].id);
-    pane.innerHTML = head('Passes & dates', 'What’s on sale: one line per venue, night and pass type',
-      '<button class="btn ghost sm" id="bulkP" type="button">+ Add many nights</button><button class="btn sm" id="addP" type="button">+ Add pass</button>') + `
-      <div class="filters"><select class="input" id="pv">${vs.map((v) => `<option value="${v.id}">${esc(v.name)}</option>`).join('')}</select>
-      <span class="muted sm">Leave the date empty for a season pass (all nights). “Held” counts unpaid holds, pending and confirmed.</span></div>
+    pane.innerHTML = head('Nights & stock', 'One row per night: how many passes exist, and how many are gone',
+      '<button class="btn ghost sm" id="bulkP" type="button">+ Add a range of nights</button><button class="btn sm" id="addP" type="button">+ Add night</button>') + `
+      <div class="filters"><span class="muted sm">“Held” counts unpaid holds, payments awaiting verification and confirmed passes. The pass price is set under <a href="#settings">Settings</a>.</span></div>
       <div class="panel2" id="pbox"><div class="empty-state">Loading…</div></div>`;
-    if (!vs.length) { $('#pbox').innerHTML = '<div class="empty-state">Add a venue first.</div>'; return; }
-    $('#pv').value = pstate.venue;
-    $('#pv').onchange = (e) => { pstate.venue = e.target.value; loadPasses(); };
-    $('#addP').onclick = () => passForm();
+    $('#addP').onclick = () => nightForm();
     $('#bulkP').onclick = bulkForm;
     loadPasses();
   }
   let passCache = [];
   async function loadPasses() {
     const box = $('#pbox');
-    try { passCache = await Q(F.passes, { venueId: pstate.venue }); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
-    if (!passCache.length) { box.innerHTML = '<div class="empty-state">No passes for this venue yet. Use “Add many nights” to create all nine at once.</div>'; return; }
-    box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Night</th><th>Pass</th><th class="num">Price</th><th class="num">Qty</th><th class="num">Held</th><th class="num">Left</th><th class="num">Max/booking</th><th>On sale</th><th></th></tr></thead><tbody>
-      ${passCache.map((p) => `<tr class="${p.active ? '' : 'inactive'}"><td>${esc(dateShort(p.date))}</td><td>${esc(p.label)}${p.admits > 1 ? ` <span class="muted sm">admits ${p.admits}</span>` : ''}${p.description ? `<div class="muted sm">${esc(p.description)}</div>` : ''}</td>
-        <td class="num">${inr(p.price)}</td><td class="num">${p.quantity}</td><td class="num">${p.held}</td><td class="num">${p.quantity - p.held}</td><td class="num">${p.maxPerBooking}</td>
+    try { passCache = await Q(F.passes); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
+    if (!passCache.length) { box.innerHTML = '<div class="empty-state">No nights yet. Use “Add a range of nights” to create all nine at once.</div>'; return; }
+    box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Night</th><th class="num">Passes</th><th class="num">Confirmed</th><th class="num">Unpaid holds</th><th class="num">Held</th><th class="num">Left</th><th>On sale</th><th></th></tr></thead><tbody>
+      ${passCache.map((p) => `<tr class="${p.active ? '' : 'inactive'}"><td>${esc(dateShort(p.date))}<div class="muted sm">${esc(p.date)}</div></td>
+        <td class="num">${p.quantity}</td><td class="num">${p.sold}</td><td class="num">${p.unpaid}</td><td class="num">${p.held}</td><td class="num">${p.quantity - p.held}</td>
         <td><label class="switch"><input type="checkbox" data-t="${p.id}" ${p.active ? 'checked' : ''} aria-label="On sale"></label></td>
         <td class="num"><button class="iconbtn" data-e="${p.id}">Edit</button> <button class="iconbtn danger" data-d="${p.id}">Delete</button></td></tr>`).join('')}
     </tbody></table></div>`;
     box.onclick = async (e) => {
       const t = e.target;
-      if (t.dataset.e) passForm(passCache.find((p) => p.id === t.dataset.e));
+      if (t.dataset.e) nightForm(passCache.find((p) => p.id === t.dataset.e));
       if (t.dataset.d) {
-        if (!confirm('Delete this pass line?')) return;
-        try { await M(F.deletePass, { id: t.dataset.d }); toast('Deleted'); loadPasses(); } catch (ex) { toast(ex.message, 'bad'); }
+        if (!confirm('Remove this night from sale entirely?')) return;
+        try { await M(F.deletePass, { id: t.dataset.d }); toast('Night removed'); loadPasses(); } catch (ex) { toast(ex.message, 'bad'); }
       }
     };
     box.onchange = async (e) => {
       const t = e.target;
       if (!t.dataset.t) return;
       const p = passCache.find((x) => x.id === t.dataset.t);
-      try { await M(F.savePass, { ...passArgs(p), id: p.id, active: t.checked }); toast(t.checked ? 'On sale' : 'Taken off sale'); loadPasses(); }
+      try { await M(F.savePass, { id: p.id, date: p.date, quantity: p.quantity, active: t.checked }); toast(t.checked ? 'On sale' : 'Taken off sale'); loadPasses(); }
       catch (ex) { toast(ex.message, 'bad'); t.checked = !t.checked; }
     };
   }
-  const passArgs = (p) => ({
-    venueId: p.venueId, date: p.date || null, label: p.label, description: p.description || undefined,
-    price: Number(p.price) || 0, quantity: Number(p.quantity) || 0, maxPerBooking: Number(p.maxPerBooking) || 10,
-    admits: Number(p.admits) || 1, active: !!p.active, sort: Number(p.sort) || 0,
-  });
-  const passFields = (withDate) => [
-    { name: 'venueId', label: 'Venue', type: 'select', options: venuesCache.map((v) => ({ v: v.id, l: v.name })), required: true, full: true },
-    ...(withDate ? [{ name: 'date', label: 'Date (empty = season pass)', type: 'date' }] : []),
-    { name: 'label', label: 'Pass name', required: true, placeholder: 'Daily Pass / Couple Pass / Kids' },
-    { name: 'price', label: 'Price (₹)', type: 'number', min: 0, required: true },
-    { name: 'quantity', label: 'Quantity available', type: 'number', min: 0, required: true },
-    { name: 'admits', label: 'People per pass', type: 'number', min: 1 },
-    { name: 'maxPerBooking', label: 'Max per booking', type: 'number', min: 1 },
-    { name: 'description', label: 'Note shown to guests', full: true },
-    { name: 'sort', label: 'Order', type: 'number' },
+  const nightFields = [
+    { name: 'date', label: 'Date of the night', type: 'date', required: true },
+    { name: 'quantity', label: 'Passes available', type: 'number', min: 0, required: true },
     { name: 'active', label: 'On sale', type: 'switch' },
   ];
-  function passForm(p) {
+  function nightForm(p) {
     formModal({
-      title: p ? 'Edit pass' : 'Add pass',
-      fields: passFields(true),
-      values: p || { venueId: pstate.venue, label: 'Daily Pass', admits: 1, maxPerBooking: 10, active: true, sort: 0 },
+      title: p ? `Edit ${dateShort(p.date)}` : 'Add a night',
+      fields: nightFields,
+      values: p || { quantity: 500, active: true },
       submit: async (v) => {
-        await M(F.savePass, { ...(p ? { id: p.id } : {}), ...passArgs(v) });
-        toast('Pass saved', 'ok'); loadPasses();
+        await M(F.savePass, { ...(p ? { id: p.id } : {}), date: v.date, quantity: Number(v.quantity) || 0, active: !!v.active });
+        toast('Night saved', 'ok'); loadPasses();
       },
     });
   }
   function bulkForm() {
     formModal({
-      title: 'Add a pass for many nights',
-      intro: 'Creates one pass line per night in the range — e.g. a Daily Pass for all nine nights.',
-      fields: [{ name: 'from', label: 'First night', type: 'date', required: true }, { name: 'to', label: 'Last night', type: 'date', required: true }, ...passFields(false)],
-      values: { venueId: pstate.venue, from: '2026-10-11', to: '2026-10-19', label: 'Daily Pass', admits: 1, maxPerBooking: 10, active: true, sort: 0 },
+      title: 'Add a range of nights',
+      intro: 'Creates one row per night in the range — e.g. all nine nights of Navratri at once. Nights that already exist are left as they are.',
+      fields: [
+        { name: 'from', label: 'First night', type: 'date', required: true },
+        { name: 'to', label: 'Last night', type: 'date', required: true },
+        { name: 'quantity', label: 'Passes available each night', type: 'number', min: 0, required: true },
+        { name: 'active', label: 'On sale', type: 'switch' },
+      ],
+      values: { from: '2026-10-11', to: '2026-10-19', quantity: 500, active: true },
       submit: async (v) => {
-        const { date, ...rest } = passArgs(v);
-        const n = await M(F.bulkPasses, { ...rest, from: v.from, to: v.to });
-        toast(`${n} nights added`, 'ok'); loadPasses();
+        const n = await M(F.bulkPasses, { from: v.from, to: v.to, quantity: Number(v.quantity) || 0, active: !!v.active });
+        toast(n ? `${n} night${n === 1 ? '' : 's'} added` : 'Those nights already existed', n ? 'ok' : '');
+        loadPasses();
       },
     });
   }
@@ -676,11 +601,19 @@
       { name: 'upi_qr_image', label: 'Your own QR image (optional)', type: 'image', full: true, help: 'Leave empty to auto-generate a QR per booking with the exact amount filled in (recommended).' },
     ];
     const groups = [
-      ['Booking &amp; payment window', [
-        { name: 'payment_instructions', label: 'Payment instructions', type: 'textarea', full: true },
-        { name: 'hold_minutes', label: 'Minutes to pay before passes are released', type: 'number', min: 5 },
+      ['The pass', [
+        { name: 'pass_price', label: 'Price per pass (₹)', type: 'number', min: 0, help: 'One pass, one person, one night. This is the only price there is — changing it does not alter bookings already made.' },
         { name: 'max_items_per_booking', label: 'Max passes per booking', type: 'number', min: 1 },
         { name: 'booking_open', label: 'Online booking open', type: 'switch', full: true },
+      ]],
+      ['The ground', [
+        { name: 'venue_address', label: 'Address', full: true },
+        { name: 'venue_map_url', label: 'Google Maps link', full: true, placeholder: 'https://maps.app.goo.gl/…' },
+        { name: 'venue_photo', label: 'Photo of the ground', type: 'image', full: true },
+      ]],
+      ['Payment window', [
+        { name: 'payment_instructions', label: 'Payment instructions', type: 'textarea', full: true },
+        { name: 'hold_minutes', label: 'Minutes to pay before passes are released', type: 'number', min: 5 },
       ]],
       ['Event', [
         { name: 'event_title', label: 'Event title' }, { name: 'event_dates_text', label: 'Dates (as shown)' },
@@ -694,7 +627,7 @@
         { name: 'contact_email', label: 'Email', type: 'email' }, { name: 'instagram_url', label: 'Instagram URL' }, { name: 'youtube_url', label: 'YouTube URL' },
       ]],
     ];
-    pane.innerHTML = head('Settings', 'Payment details, event text and contact info') + `<form class="sgrid" id="sform" novalidate>
+    pane.innerHTML = head('Settings', 'The price, the ground, payment details, event text and contact info') + `<form class="sgrid" id="sform" novalidate>
       ${groups.map(([t, fs]) => `<section class="panel2"><h2>${t}</h2><div class="pad">${fs.map((f) => fieldHtml(f, s[f.name])).join('')}</div></section>`).join('')}
       <div class="savebar"><button class="btn" type="submit">Save settings</button></div></form>
       <form class="sgrid" id="payform" style="margin-top:10px" novalidate><section class="panel2"><h2>Payment (UPI) — where the money goes</h2><div class="pad">

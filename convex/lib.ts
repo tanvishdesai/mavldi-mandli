@@ -16,8 +16,7 @@ const IST = 5.5 * 3600_000;
 export const todayIST = (now = Date.now()) => new Date(now + IST).toISOString().slice(0, 10);
 /* Garba runs past midnight: until 6 am the gate still counts as the previous night. */
 export const gateNight = (now = Date.now()) => new Date(now + IST - 6 * 3600_000).toISOString().slice(0, 10);
-export function fmtDate(iso: string | null) {
-  if (!iso) return "Season";
+export function fmtDate(iso: string) {
   const d = new Date(iso + "T12:00:00Z");
   const wd = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getUTCDay()];
   const m = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][d.getUTCMonth()];
@@ -50,6 +49,10 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   event_title: "Navratri 2026",
   event_dates_text: "11th – 19th October, 2026",
   event_time_text: "8:30 pm onwards",
+  pass_price: "599",
+  venue_address: "",
+  venue_map_url: "",
+  venue_photo: "",
   upi_id: "mavladimandli@upi",
   upi_payee_name: "Mavladi Mandli",
   upi_qr_image: "",
@@ -64,9 +67,9 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   instagram_url: "",
   youtube_url: "",
   about_text:
-    "Mavladi is a sheri-style garba raised in the courtyard of the Mother. Nine nights of dhol, diya and devotion — where the old circles are danced the old way, and every family finds its place in the ring.",
+    "Mavladi is a sheri-style garba raised in the courtyard of the Mother. Nine nights of dhol, diya and devotion — where the old circles are danced the old way, and every family finds its place in the ring. One ground, one circle, one pass.",
   terms_text:
-    "Passes are non-transferable and non-refundable once confirmed. Traditional attire is mandatory. Entry is subject to security checks. The management reserves the right of admission.",
+    "One pass admits one person for the night it is booked for. Passes are non-transferable and non-refundable once confirmed. Traditional attire is mandatory. Entry is subject to security checks. The management reserves the right of admission.",
 };
 export const PUBLIC_SETTINGS = Object.keys(DEFAULT_SETTINGS);
 /* Where the money goes. Changing any of these silently redirects every future
@@ -75,7 +78,7 @@ export const PUBLIC_SETTINGS = Object.keys(DEFAULT_SETTINGS);
 export const PAYMENT_SETTINGS = ["upi_id", "upi_payee_name", "upi_qr_image"];
 export const EDITABLE_SETTINGS = PUBLIC_SETTINGS.filter((k) => !PAYMENT_SETTINGS.includes(k));
 /* Settings rendered into an href/src attribute by the frontend. */
-export const URL_SETTINGS = ["instagram_url", "youtube_url", "upi_qr_image"];
+export const URL_SETTINGS = ["instagram_url", "youtube_url", "upi_qr_image", "venue_map_url", "venue_photo"];
 
 export async function getSetting(ctx: QueryCtx, key: string) {
   const row = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", key)).unique();
@@ -127,7 +130,7 @@ export const LIMITS = {
   lookupPerPhone: { max: 10, windowMs: 15 * 60_000 },
   lookupPerCode: { max: 10, windowMs: 15 * 60_000 },
   uploadPerBooking: { max: 12, windowMs: 60 * 60_000 },
-  /* Unpaid holds may never sit on more than this share of a pass's stock, so a
+  /* Unpaid holds may never sit on more than this share of a night's stock, so a
      flood of fake holds can delay at most a quarter of the event's sales. */
   unpaidShareOfStock: 0.25,
   /* Hard ceiling on simultaneous unpaid holds across the whole event. */
@@ -164,7 +167,7 @@ export async function shortfall(ctx: QueryCtx, items: Doc<"bookings">["items"]) 
   for (const [id, qty] of need) {
     const p = await ctx.db.get(id);
     const it = items.find((i) => i.passId === id)!;
-    const what = `${it.passLabel}${it.passDate ? " · " + fmtDate(it.passDate) : ""}`;
+    const what = fmtDate(it.date);
     if (!p) return what;
     if (qty > p.quantity - p.held) return what;
   }
@@ -192,7 +195,7 @@ export async function applyStatus(
   for (const it of items) {
     const p = await ctx.db.get(it.passId);
     if (!p) continue;
-    let held = p.held, sold = p.sold, unpaid = p.unpaid ?? 0;
+    let held = p.held, sold = p.sold, unpaid = p.unpaid;
     if (wasHeld && !nowHeld) held -= it.qty;
     if (!wasHeld && nowHeld) held += it.qty;
     if (from === "confirmed") sold -= it.qty;

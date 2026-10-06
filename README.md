@@ -1,6 +1,6 @@
 # માવલડી મંડળી — Mavladi Mandli garba passes
 
-Online garba pass booking for Navratri. Guests pick a venue, nights and pass type, pay by **UPI** (QR code or UPI ID), and upload a payment screenshot and UTR number. The team checks each payment by hand in the admin panel. The guest's QR e-pass goes live only after that check.
+Online garba pass booking for Navratri. One ground — ours — and one kind of pass: **₹599 per person, per night**. Guests pick the nights they want, pay by **UPI** (QR code or UPI ID), and upload a payment screenshot and UTR number. The team checks each payment by hand in the admin panel. The guest's QR e-pass goes live only after that check.
 
 - **Backend + database:** [Convex](https://convex.dev). You can run it yourself with Docker (`self-hosted/`), or use Convex cloud; the code is the same either way.
 - **Frontend:** plain HTML/CSS/JS in `public/`, deployed as a static site on **Vercel**. The build step only copies in the Convex browser client and writes the backend URL.
@@ -62,7 +62,7 @@ npx convex run seed:run                            # optional sample data
    With these set, every Vercel deploy **also pushes the Convex functions** and builds the site against that backend.
    If you'd rather deploy functions yourself and keep the admin key out of Vercel, set only `CONVEX_URL=https://api.mavladi.example` instead.
 3. Deploy. Then open `https://<your-site>/admin`, sign in with the `ADMIN_PASSWORD` you set above, and:
-   - load the sample data or add your venues and passes, and
+   - load the sample data or add your nights and set the pass price, and
    - under **Settings → Payment (UPI)**, enter your real **UPI ID** and **payee name**. Payments go to this ID, so double-check it. Saving it asks for your admin password again and records the change under **Settings → Recent changes**.
 4. **If your Convex backend is on your own domain** (not `*.convex.cloud`), add it to the `connect-src` list in the `Content-Security-Policy` header in `vercel.json` — otherwise the browser will block the site from reaching its own backend. The shipped policy already covers `*.convex.cloud` and `*.convex.site`.
 
@@ -82,8 +82,8 @@ npm run typecheck
 ## How it works
 
 ### Guest flow
-1. **Home** (`/`): the scroll journey, live venue cards with prices and passes left, and FAQs.
-2. **Book** (`/book`): pick a venue, then season or daily passes per night. Enter name, phone and optional email, then press **Reserve & pay**.
+1. **Home** (`/`): the scroll journey, the nine nights, the ground with the price and passes left, and FAQs.
+2. **Book** (`/book`): pick how many passes you want for each night. Enter name, phone and optional email, then press **Reserve & pay**.
 3. **Pay** (`/ticket?code=…&t=…`): the passes are **held** for a set time (30 min by default) with a countdown. The page shows:
    - a UPI QR code made in the browser for this booking, with the exact amount and booking code filled in. You can upload your own fixed QR in Settings instead.
    - the UPI ID with a copy button, and an "Open UPI app" button on phones.
@@ -95,7 +95,7 @@ The booking link has a secret made in the guest's browser (`t=`). Without it, or
 
 ### Admin (`/admin`)
 - **Dashboard** (live): payments waiting for verification, confirmed revenue, passes sold and held, check-ins tonight, and stock per night. On an empty database it offers to load the sample data.
-- **Bookings** (live): filter by status, venue or date, or search by code/name/phone/UTR. Opening a booking shows:
+- **Bookings** (live): filter by status or night, or search by code/name/phone/UTR. Opening a booking shows:
   - the **screenshot**, UTR, amount and passes;
   - a warning when the **same UTR appears on another booking**, and a list of the guest's other bookings;
   - buttons to **Confirm**, **Reject** (with a reason the guest sees), or **Ask to re-upload** (holds the passes 24 h more), plus cancel, reopen, edit and delete;
@@ -103,13 +103,14 @@ The booking link has a secret made in the guest's browser (`t=`). Without it, or
 
   Keyboard shortcuts: `c` confirms, `r` rejects, `j`/`k` move between bookings. After each decision the next one opens.
 - **Counter booking** for cash sales, **CSV export**.
-- **Gate check-in**: scan the QR (in-browser camera scanner, or the phone camera, which opens the page with the code filled in) or type the code. One check-in per night, so season passes work every night. It warns when a pass is for another night.
-- **Venues** (with photo upload), **Passes & dates** ("add many nights" creates a whole date range at once), **FAQs**, **Settings** (UPI, payment window, booking on/off, texts, contact, password).
+- **Gate check-in**: scan the QR (in-browser camera scanner, or the phone camera, which opens the page with the code filled in) or type the code. One check-in per night. It warns when a pass is for another night.
+- **Nights & stock**: one row per night — how many passes exist, how many are confirmed, held and left, and whether that night is on sale. "Add a range of nights" creates a whole date range at once.
+- **FAQs**, and **Settings**: the **pass price**, the **ground** (address, map link, photo), UPI details, payment window, booking on/off, event texts, contact, password.
 
 ### Rules that keep stock honest
-- Each pass keeps running `held`, `sold` and `unpaid` counters, updated in the **same Convex transaction** as the booking's status. Two people can never both buy the last pass.
+- Each night keeps running `held`, `sold` and `unpaid` counters, updated in the **same Convex transaction** as the booking's status. Two people can never both buy the last pass for a night.
 - Unpaid holds expire through a **scheduled function** at exactly their deadline, with a 10-minute cron as a safety net. If proof arrives just after expiry, the booking is kept when the passes are still available. If not, the proof is saved and the guest is asked to contact you.
-- **Hold flooding is bounded three ways**: at most 3 unpaid holds per phone number, a rate limit per number, and — the backstop, since a phone number is just a string an attacker supplies — unpaid holds may never cover more than **25% of any pass's stock**, plus a hard ceiling of 1000 simultaneous unpaid holds event-wide. A script with ten thousand fake numbers can delay at most a quarter of sales, not the event.
+- **Hold flooding is bounded three ways**: at most 3 unpaid holds per phone number, a rate limit per number, and — the backstop, since a phone number is just a string an attacker supplies — unpaid holds may never cover more than **25% of any night's stock**, plus a hard ceiling of 1000 simultaneous unpaid holds event-wide. A script with ten thousand fake numbers can delay at most a quarter of sales, not the event.
 
 ### Rules that keep the money honest
 - **One UTR, one booking.** A transaction ID already recorded against a live booking is **refused** at submission, so the same payment screenshot cannot be reused. Confirming past a duplicate requires an explicit override and is written to the audit log.

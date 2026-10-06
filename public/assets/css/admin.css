@@ -142,14 +142,6 @@ dialog.modal::backdrop { background: rgba(30, 4, 5, 0.5); }
 .imgfield { display: flex; gap: 12px; align-items: center; }
 .imgfield img { width: 90px; height: 60px; object-fit: cover; border-radius: 8px; background: #eee; }
 
-/* venue cards */
-.vgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
-.vcard { background: #fff; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-.vcard img { width: 100%; aspect-ratio: 16 / 8; object-fit: cover; background: #eee; }
-.vcard .b { padding: 14px 16px; display: grid; gap: 6px; }
-.vcard h3 { font-size: 1.05rem; }
-.vcard .a { display: flex; gap: 6px; margin-top: 6px; }
-
 /* settings */
 .sgrid { display: grid; gap: 18px; max-width: 880px; }
 .sgrid .panel2 .pad { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
