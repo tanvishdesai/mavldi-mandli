@@ -82,7 +82,7 @@ npm run typecheck
 ## How it works
 
 ### Guest flow
-1. **Home** (`/`): the scroll journey, the nine nights, the ground with the price and passes left, and FAQs.
+1. **Home** (`/`): the scroll journey, the ten nights, the ground with the price and passes left, and FAQs.
 2. **Book** (`/book`): pick how many passes you want for each night. Enter name, phone and optional email, then press **Reserve & pay**.
 3. **Pay** (`/ticket?code=…&t=…`): the passes are **held** for a set time (30 min by default) with a countdown. The page shows:
    - a UPI QR code made in the browser for this booking, with the exact amount and booking code filled in. You can upload your own fixed QR in Settings instead.

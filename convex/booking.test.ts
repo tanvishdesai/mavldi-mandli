@@ -50,7 +50,7 @@ const err = async (p: Promise<unknown>) => {
 test("catalogue is one price and one row per night", async () => {
   const t = await setup();
   const cat = await t.query(api.public.catalogue, {});
-  expect(cat.nights).toHaveLength(9);
+  expect(cat.nights).toHaveLength(10);
   expect(cat.price).toBe(PRICE);
   expect(cat.booking_open).toBe(true);
   expect(cat.nights.every((p: any) => p.available === p.quantity)).toBe(true);
@@ -345,10 +345,10 @@ test("upload URLs are rate limited", async () => {
 
 test("admin CRUD: nights, settings, lookup, delete keeps counters right", async () => {
   const t = await setup();
-  // the nine seeded nights already exist, so a bulk add over them creates nothing new
-  expect(await t.mutation(api.admin.bulkPasses, { token: TOKEN, from: "2026-10-11", to: "2026-10-19", quantity: 50, active: true })).toBe(0);
-  expect(await t.mutation(api.admin.bulkPasses, { token: TOKEN, from: "2026-10-20", to: "2026-10-22", quantity: 50, active: true })).toBe(3);
-  expect(await err(t.mutation(api.admin.savePass, { token: TOKEN, date: "2026-10-20", quantity: 10, active: true }))).toMatch(/already in the list/);
+  // the ten seeded nights already exist, so a bulk add over them creates nothing new
+  expect(await t.mutation(api.admin.bulkPasses, { token: TOKEN, from: "2026-10-11", to: "2026-10-20", quantity: 50, active: true })).toBe(0);
+  expect(await t.mutation(api.admin.bulkPasses, { token: TOKEN, from: "2026-10-21", to: "2026-10-23", quantity: 50, active: true })).toBe(3);
+  expect(await err(t.mutation(api.admin.savePass, { token: TOKEN, date: "2026-10-21", quantity: 10, active: true }))).toMatch(/already in the list/);
 
   await t.action(api.admin.savePaymentSettings, { token: TOKEN, password: PASSWORD, values: { upi_id: "mandli@okaxis" } });
   const cfg = await t.query(api.public.config, {});

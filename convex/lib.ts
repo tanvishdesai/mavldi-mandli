@@ -47,11 +47,11 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   tagline: "The Reality of Culture",
   tagline_gu: "મા ના આંગણે રંગોત્સવ",
   event_title: "Navratri 2026",
-  event_dates_text: "11th – 19th October, 2026",
-  event_time_text: "8:30 pm onwards",
+  event_dates_text: "11th – 20th October, 2026",
+  event_time_text: "9:00 pm – 4:00 am",
   pass_price: "599",
-  venue_address: "",
-  venue_map_url: "",
+  venue_address: "Mavaldi Mandli Ground, beside Funblast, Nikol–Hanspura Road, Naroda, Ahmedabad 382330",
+  venue_map_url: "https://maps.app.goo.gl/BweumSShRonT4cou9",
   venue_photo: "",
   upi_id: "mavladimandli@upi",
   upi_payee_name: "Mavladi Mandli",
@@ -67,7 +67,7 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   instagram_url: "",
   youtube_url: "",
   about_text:
-    "Mavladi is a sheri-style garba raised in the courtyard of the Mother. Nine nights of dhol, diya and devotion — where the old circles are danced the old way, and every family finds its place in the ring. One ground, one circle, one pass.",
+    "Mavladi is a sheri-style garba raised in the courtyard of the Mother. Ten nights of dhol, diya and devotion — where the old circles are danced the old way, and every family finds its place in the ring. One ground, one circle, one pass.",
   terms_text:
     "One pass admits one person for the night it is booked for. Passes are non-transferable and non-refundable once confirmed. Traditional attire is mandatory. Entry is subject to security checks. The management reserves the right of admission.",
 };

@@ -55,9 +55,9 @@
 
   function renderNights() {
     const dates = nights.map((n) => n.date);
-    const list = dates.length ? dates : ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19'];
+    const list = dates.length ? dates : ['2026-10-11', '2026-10-12', '2026-10-13', '2026-10-14', '2026-10-15', '2026-10-16', '2026-10-17', '2026-10-18', '2026-10-19', '2026-10-20'];
     $('#nightList').innerHTML = list.map((d, i) => {
-      const [en, gu] = NAVDURGA[i % 9];
+      const [en, gu] = NAVDURGA[i] || ['Dussehra', 'દશેરા']; // the tenth night
       const p = dateParts(d);
       return `<a class="night" href="/book?date=${d}" aria-label="Night ${i + 1}, ${en}, ${p.wd} ${p.d} ${p.m}">
         <span class="n">${i + 1}</span><span class="g">${gu}</span><span class="e">${en}</span>

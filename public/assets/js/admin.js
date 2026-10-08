@@ -119,7 +119,7 @@
   function drawDashboard(pane, s) {
     if (s.empty) {
       pane.innerHTML = head('Welcome 🙏', 'No nights are set up yet') + `<div class="panel2"><div class="pad" style="display:grid;gap:12px;justify-items:start">
-        <p>Add the nights you are selling passes for, or load the sample data (nine nights of Navratri 2026 plus FAQs) and edit it. The pass price lives in Settings.</p>
+        <p>Add the nights you are selling passes for, or load the sample data (ten nights of Navratri 2026 plus FAQs) and edit it. The pass price lives in Settings.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="sample" type="button">Load sample data</button><a class="btn ghost sm" href="#passes">Add nights</a></div></div></div>`;
       $('#sample').onclick = async (e) => { busy(e.target, true, 'Loading…'); try { await M(F.loadSampleData); toast('Sample data loaded', 'ok'); } catch (x) { busy(e.target, false); toast(x.message, 'bad'); } };
       return;
@@ -505,7 +505,7 @@
   async function loadPasses() {
     const box = $('#pbox');
     try { passCache = await Q(F.passes); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
-    if (!passCache.length) { box.innerHTML = '<div class="empty-state">No nights yet. Use “Add a range of nights” to create all nine at once.</div>'; return; }
+    if (!passCache.length) { box.innerHTML = '<div class="empty-state">No nights yet. Use “Add a range of nights” to create them all at once.</div>'; return; }
     box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Night</th><th class="num">Passes</th><th class="num">Confirmed</th><th class="num">Unpaid holds</th><th class="num">Held</th><th class="num">Left</th><th>On sale</th><th></th></tr></thead><tbody>
       ${passCache.map((p) => `<tr class="${p.active ? '' : 'inactive'}"><td>${esc(dateShort(p.date))}<div class="muted sm">${esc(p.date)}</div></td>
         <td class="num">${p.quantity}</td><td class="num">${p.sold}</td><td class="num">${p.unpaid}</td><td class="num">${p.held}</td><td class="num">${p.quantity - p.held}</td>
@@ -547,7 +547,7 @@
   function bulkForm() {
     formModal({
       title: 'Add a range of nights',
-      intro: 'Creates one row per night in the range — e.g. all nine nights of Navratri at once. Nights that already exist are left as they are.',
+      intro: 'Creates one row per night in the range — e.g. all ten nights at once. Nights that already exist are left as they are.',
       fields: [
         { name: 'from', label: 'First night', type: 'date', required: true },
         { name: 'to', label: 'Last night', type: 'date', required: true },

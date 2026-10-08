@@ -4,19 +4,21 @@
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { setSetting } from "./lib";
 
-/* The nine nights of Navratri. One ground, one pass per person per night. */
+/* Navratri plus Dussehra: ten nights. One ground, one pass per person per night. */
 const NIGHTS = [
   "2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15",
-  "2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19",
+  "2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19", "2026-10-20",
 ];
 const PER_NIGHT = 800;
+const VENUE_ADDRESS = "Mavaldi Mandli Ground, beside Funblast, Nikol–Hanspura Road, Naroda, Ahmedabad 382330";
+const VENUE_MAP_URL = "https://maps.app.goo.gl/BweumSShRonT4cou9";
 
 export async function seedData(ctx: MutationCtx) {
   for (const date of NIGHTS) {
     await ctx.db.insert("passes", { date, quantity: PER_NIGHT, active: true, held: 0, sold: 0, unpaid: 0 });
   }
-  await setSetting(ctx, "venue_address", "Main Garba Ground, Vadodara, Gujarat");
-  await setSetting(ctx, "venue_map_url", "https://maps.google.com/?q=Vadodara");
+  await setSetting(ctx, "venue_address", VENUE_ADDRESS);
+  await setSetting(ctx, "venue_map_url", VENUE_MAP_URL);
   await setSetting(ctx, "venue_photo", "/assets/img/stage.webp");
 
   const faqs: [string, string][] = [
@@ -38,5 +40,24 @@ export const run = internalMutation({
     if (await ctx.db.query("passes").first()) return "Nights already exist — skipped.";
     await seedData(ctx);
     return `Seeded ${NIGHTS.length} nights and sample FAQs.`;
+  },
+});
+
+/* Bring an already-seeded deployment up to the NIGHTS list above, and re-point
+   the venue settings, without touching nights (or bookings) that exist:
+     npx convex run --prod seed:nights
+   Use it when the dates or the ground change; the admin panel can do the same
+   thing by hand (Nights → add a range, Settings → the ground). */
+export const nights = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    let added = 0;
+    for (const date of NIGHTS) {
+      const row = await ctx.db.query("passes").withIndex("by_date", (q) => q.eq("date", date)).unique();
+      if (!row) { await ctx.db.insert("passes", { date, quantity: PER_NIGHT, active: true, held: 0, sold: 0, unpaid: 0 }); added++; }
+    }
+    await setSetting(ctx, "venue_address", VENUE_ADDRESS);
+    await setSetting(ctx, "venue_map_url", VENUE_MAP_URL);
+    return `${NIGHTS.length} nights on sale (${added} added); venue updated.`;
   },
 });
