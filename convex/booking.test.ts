@@ -3,6 +3,7 @@ import { convexTest } from "convex-test";
 import { expect, test, vi, beforeEach, afterEach } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
+import { upiUri } from "./lib";
 
 const modules = import.meta.glob("./**/*.ts");
 const SECRET = "guest-secret-0123456789abcdef";
@@ -408,4 +409,11 @@ test("the ground's details are settings, and its links can't carry javascript:",
     expect(await err(t.mutation(api.admin.saveSettings, { token: TOKEN, values: { venue_photo: bad } }))).toMatch(/must start with/);
   }
   expect((await t.query(api.public.config, {})).venue_map_url).toBe("https://maps.google.com/?q=Vadodara");
+});
+
+test("payment QR carries the exact amount", () => {
+  const uri = upiUri("mavladi@upi", "Mavladi Mandli", 1198, "MM-ABC123");
+  expect(uri).toContain("am=1198.00");
+  expect(uri).toContain("cu=INR");
+  expect(uri).toContain("pa=mavladi%40upi");
 });

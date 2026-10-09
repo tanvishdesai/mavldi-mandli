@@ -598,7 +598,6 @@
     const payFields = [
       { name: 'upi_id', label: 'UPI ID', required: true, placeholder: 'yourname@okhdfcbank', help: 'Money goes here. Double-check it!' },
       { name: 'upi_payee_name', label: 'Payee name', required: true },
-      { name: 'upi_qr_image', label: 'Your own QR image (optional)', type: 'image', full: true, help: 'Leave empty to auto-generate a QR per booking with the exact amount filled in (recommended).' },
     ];
     const groups = [
       ['The pass', [

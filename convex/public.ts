@@ -88,7 +88,7 @@ export const booking = query({
       const s = await allSettings(ctx);
       view.payment = {
         upi_id: s.upi_id, payee: s.upi_payee_name, uri: upiUri(s.upi_id, s.upi_payee_name, b.amount, b.code),
-        qr_image: s.upi_qr_image || null, instructions: s.payment_instructions,
+        instructions: s.payment_instructions,
       };
     }
     return view;

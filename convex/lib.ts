@@ -55,7 +55,6 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   venue_photo: "",
   upi_id: "mavladimandli@upi",
   upi_payee_name: "Mavladi Mandli",
-  upi_qr_image: "",
   payment_instructions:
     "Pay the exact amount using any UPI app (GPay, PhonePe, Paytm, BHIM). Take a screenshot of the success screen that shows the UTR / transaction ID, then upload it below.",
   hold_minutes: "30",
@@ -75,10 +74,10 @@ export const PUBLIC_SETTINGS = Object.keys(DEFAULT_SETTINGS);
 /* Where the money goes. Changing any of these silently redirects every future
    payment, so they need the password re-entered (admin.savePaymentSettings)
    and are refused by the ordinary settings mutation. */
-export const PAYMENT_SETTINGS = ["upi_id", "upi_payee_name", "upi_qr_image"];
+export const PAYMENT_SETTINGS = ["upi_id", "upi_payee_name"];
 export const EDITABLE_SETTINGS = PUBLIC_SETTINGS.filter((k) => !PAYMENT_SETTINGS.includes(k));
 /* Settings rendered into an href/src attribute by the frontend. */
-export const URL_SETTINGS = ["instagram_url", "youtube_url", "upi_qr_image", "venue_map_url", "venue_photo"];
+export const URL_SETTINGS = ["instagram_url", "youtube_url", "venue_map_url", "venue_photo"];
 
 export async function getSetting(ctx: QueryCtx, key: string) {
   const row = await ctx.db.query("settings").withIndex("by_key", (q) => q.eq("key", key)).unique();

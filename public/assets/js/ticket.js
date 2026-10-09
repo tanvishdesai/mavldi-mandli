@@ -111,7 +111,8 @@
   function renderPay(b) {
     head('ચુકવણી કરો', 'Complete your payment', `Booking ${b.code} · passes held for you`);
     const pay = b.payment;
-    const qrSrc = pay.qr_image || qr(pay.uri);
+    /* always the generated QR: it carries the exact amount, so no one mistypes it */
+    const qrSrc = qr(pay.uri);
     view.innerHTML = `
       ${b.message ? `<div class="notice info"><b>Note from the team:</b>&nbsp;${esc(b.message)}</div>` : ''}
       <div class="paygrid">
@@ -122,7 +123,7 @@
           <p style="margin-top:10px"><span class="timer" id="timer" role="timer">⏳ <span>--:--</span> left to pay</span></p>
           <div class="qrbox"><span class="corner c1"></span><span class="corner c2"></span><span class="corner c3"></span><span class="corner c4"></span>
             <img src="${esc(qrSrc)}" alt="UPI QR code to pay ${inr(b.amount)}" width="260" height="260"></div>
-          <p style="font-size:.88rem;color:var(--ink-2)">${pay.qr_image ? `Scan with any UPI app and enter <b>${inr(b.amount)}</b>` : 'Scan with any UPI app — the amount is filled in for you'}</p>
+          <p style="font-size:.88rem;color:var(--ink-2)">Scan with any UPI app — the amount is filled in for you</p>
           <div class="upi"><code id="upiId">${esc(pay.upi_id)}</code><button class="btn sm" type="button" id="copyUpi">Copy</button></div>
           ${isMobile ? `<a class="btn gold block" style="margin-top:14px" href="${esc(pay.uri)}">Open UPI app to pay</a>` : ''}
           <div class="apps" aria-label="Works with"><span>GPay</span><span>PhonePe</span><span>Paytm</span><span>BHIM</span><span>any UPI app</span></div>
