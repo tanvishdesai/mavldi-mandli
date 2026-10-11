@@ -163,6 +163,12 @@ body.home { background: var(--night); color: var(--gold-soft); overflow-x: hidde
 .ground .meta { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 0.88rem; color: var(--ink-2); }
 .ground .meta span { display: inline-flex; gap: 6px; align-items: center; }
 .ground p.desc { color: var(--ink-2); font-size: 0.95rem; }
+.ground p.offer { font-family: var(--f-gu); font-weight: 600; color: var(--red); font-size: 1rem; }
+.ground .gprices { list-style: none; margin: 2px 0; padding: 0; display: grid; gap: 4px; }
+.ground .gprices li { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; padding: 5px 0; border-bottom: 1px dashed var(--line); }
+.ground .gprices li:last-child { border-bottom: 0; }
+.ground .gprices small { color: var(--ink-3); font-size: 0.8rem; margin-left: 8px; }
+.ground .gprices b { font-family: var(--f-display); font-size: 1.2rem; color: var(--maroon-700); }
 .ground .avail { height: 6px; border-radius: 6px; background: var(--parchment-2); overflow: hidden; margin-top: 4px; }
 .ground .avail i { display: block; height: 100%; background: linear-gradient(90deg, var(--saffron), var(--red)); border-radius: inherit; }
 .ground .avail-l { font-size: 0.8rem; color: var(--ink-3); }

@@ -49,7 +49,13 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   event_title: "Navratri 2026",
   event_dates_text: "11th – 20th October, 2026",
   event_time_text: "9:00 pm – 4:00 am",
-  pass_price: "599",
+  /* One price per kind of pass (see PASS_KINDS). Leave one blank to stop selling it. */
+  price_single: "299",
+  price_couple: "499",
+  price_group10: "2249",
+  price_group20: "3999",
+  price_season: "2000",
+  pass_offer_gu: "એક જ પાસ, આનંદ ડબલ — મંડળીની મોજ અને ગરબાનો રંગ! ✨",
   venue_address: "Mavaldi Mandli Ground, beside Funblast, Nikol–Hanspura Road, Naroda, Ahmedabad 382330",
   venue_map_url: "https://maps.app.goo.gl/BweumSShRonT4cou9",
   venue_photo: "",
@@ -68,9 +74,63 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   about_text:
     "Mavladi is a sheri-style garba raised in the courtyard of the Mother. Ten nights of dhol, diya and devotion — where the old circles are danced the old way, and every family finds its place in the ring. One ground, one circle, one pass.",
   terms_text:
-    "One pass admits one person for the night it is booked for. Passes are non-transferable and non-refundable once confirmed. Traditional attire is mandatory. Entry is subject to security checks. The management reserves the right of admission.",
+    "A pass admits the number of people it is for (one, a couple, or a group of 10 or 20) on the night it is booked for; a season pass admits one person on every night. Passes are non-transferable and non-refundable once confirmed. Traditional attire is mandatory. Entry is subject to security checks. The management reserves the right of admission.",
 };
 export const PUBLIC_SETTINGS = Object.keys(DEFAULT_SETTINGS);
+
+/* ---------- kinds of pass ----------
+   Every pass is for one night and admits `people`, except the season pass,
+   which admits one person on every night still to come. A booking line keeps
+   its kind and head-count, and stock is counted in people: a couple takes two
+   places on its night, a season pass one place on each night. */
+export const PASS_KINDS = {
+  single: { label: "Single Pass", people: 1, season: false },
+  couple: { label: "Couple Pass", people: 2, season: false },
+  group10: { label: "Group of 10", people: 10, season: false },
+  group20: { label: "Group of 20", people: 20, season: false },
+  season: { label: "Season Pass", people: 1, season: true },
+} as const;
+export type PassKind = keyof typeof PASS_KINDS;
+export const isKind = (k: unknown): k is PassKind => typeof k === "string" && Object.prototype.hasOwnProperty.call(PASS_KINDS, k);
+export const MAX_PEOPLE = Math.max(...Object.values(PASS_KINDS).map((k) => k.people));
+export const PRICE_SETTINGS = Object.keys(PASS_KINDS).map((k) => `price_${k}`);
+
+/** A price setting: a whole number of rupees, or null when blank (not on sale). */
+export const parsePrice = (v: string | undefined) => {
+  if (v === undefined || v.trim() === "") return null;
+  const n = Math.floor(parseFloat(v));
+  return Number.isFinite(n) && n >= 0 ? n : null;
+};
+/** Every kind with its current price; null means it is not on sale. */
+export function kindPrices(s: Record<string, string>) {
+  return Object.fromEntries(Object.keys(PASS_KINDS).map((k) => [k, parsePrice(s[`price_${k}`])])) as Record<PassKind, number | null>;
+}
+
+type Item = { qty: number; unitPrice: number; kind?: string; people?: number; date: string };
+/** People one booking line puts through the gate (and takes from that night's stock). */
+export const heads = (it: Item) => it.qty * (it.people ?? 1);
+/** The most people a booking admits on any one night (what the gate lets in). */
+export function admits(items: Item[]) {
+  const per = new Map<string, number>();
+  for (const it of items) per.set(it.date, (per.get(it.date) || 0) + heads(it));
+  return Math.max(0, ...per.values());
+}
+/** People a booking admits on the given night. */
+export const admitsOn = (items: Item[], night: string) =>
+  items.filter((i) => i.date === night).reduce((s, i) => s + heads(i), 0);
+/** Booking lines as the browser sees them. */
+export const itemView = (items: Item[]) =>
+  items.map((i) => ({ date: i.date, qty: i.qty, unit_price: i.unitPrice, kind: i.kind ?? "single", people: i.people ?? 1 }));
+
+/** What a booking costs. A season pass is one line per night but is paid for once. */
+export function itemsAmount(items: Item[]) {
+  let total = 0, season = 0;
+  for (const it of items) {
+    if (it.kind === "season") season = Math.max(season, it.qty * it.unitPrice);
+    else total += it.qty * it.unitPrice;
+  }
+  return total + season;
+}
 /* Where the money goes. Changing any of these silently redirects every future
    payment, so they need the password re-entered (admin.savePaymentSettings)
    and are refused by the ordinary settings mutation. */
@@ -162,7 +222,7 @@ async function bumpCounter(ctx: MutationCtx, status: string, dn: number, damount
 /** Describes the first item that can't be (re)reserved, or null if all fit. */
 export async function shortfall(ctx: QueryCtx, items: Doc<"bookings">["items"]) {
   const need = new Map<Id<"passes">, number>();
-  for (const it of items) need.set(it.passId, (need.get(it.passId) || 0) + it.qty);
+  for (const it of items) need.set(it.passId, (need.get(it.passId) || 0) + heads(it));
   for (const [id, qty] of need) {
     const p = await ctx.db.get(id);
     const it = items.find((i) => i.passId === id)!;
@@ -195,12 +255,13 @@ export async function applyStatus(
     const p = await ctx.db.get(it.passId);
     if (!p) continue;
     let held = p.held, sold = p.sold, unpaid = p.unpaid;
-    if (wasHeld && !nowHeld) held -= it.qty;
-    if (!wasHeld && nowHeld) held += it.qty;
-    if (from === "confirmed") sold -= it.qty;
-    if (to === "confirmed") sold += it.qty;
-    if (from === "awaiting_payment") unpaid -= it.qty;
-    if (to === "awaiting_payment") unpaid += it.qty;
+    const n = heads(it);
+    if (wasHeld && !nowHeld) held -= n;
+    if (!wasHeld && nowHeld) held += n;
+    if (from === "confirmed") sold -= n;
+    if (to === "confirmed") sold += n;
+    if (from === "awaiting_payment") unpaid -= n;
+    if (to === "awaiting_payment") unpaid += n;
     await ctx.db.patch(p._id, {
       held: Math.max(0, held), sold: Math.max(0, sold), unpaid: Math.max(0, unpaid),
     });

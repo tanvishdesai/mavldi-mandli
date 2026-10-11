@@ -1,7 +1,7 @@
 /* Ticket page: pay → upload proof → wait for verification → e-pass. */
 (function () {
   'use strict';
-  const { q, m, a, watch, upload, qr, fns, esc, inr, dateLong, when, PASS, toast, mine, statusPill, busy } = window.MV;
+  const { q, m, a, watch, upload, qr, fns, esc, inr, when, kindLabel, passLines, lineWhen, toast, mine, statusPill, busy } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const view = $('#view');
 
@@ -49,7 +49,7 @@
   }
 
   function itemsHtml(b) {
-    return `<ul class="itemlist">${b.items.map((i) => `<li><span>${i.qty} × ${esc(PASS)}<small>${esc(dateLong(i.date))}</small></span><b>${inr(i.qty * i.unit_price)}</b></li>`).join('')}</ul>`;
+    return `<ul class="itemlist">${passLines(b.items).map((l) => `<li><span>${l.qty} × ${esc(kindLabel(l.kind))}<small>${esc(lineWhen(l))}${l.people > 1 ? ` · admits ${l.qty * l.people}` : ''}</small></span><b>${inr(l.total)}</b></li>`).join('')}</ul>`;
   }
 
   function render() {
@@ -227,12 +227,16 @@
   function renderPass(b) {
     head('જય માતાજી', 'Your pass is confirmed', 'Show this QR code at the gate.');
     const nights = new Set(b.items.map((i) => i.date));
+    // a season pass plus a group on one night lets in different numbers on different nights
+    const perNight = {};
+    for (const i of b.items) perNight[i.date] = (perNight[i.date] || 0) + i.qty * (i.people || 1);
+    const varies = new Set(Object.values(perNight)).size > 1;
     view.innerHTML = `
       <article class="pass" aria-label="E-pass ${esc(b.code)}">
         <div class="ph">
           <img src="/assets/img/logo.webp" alt="Mavladi">
           <p class="ev">${esc(cfg.site_name_gu || 'માવલડી મંડળી')} · ${esc(cfg.event_title || 'Navratri')}</p>
-          <span class="adm">Admit ${b.admits}</span>
+          <span class="adm">Admit ${varies ? 'up to ' : ''}${b.admits}</span>
           <div class="toran gold" aria-hidden="true"></div>
         </div>
         ${b.checkins && b.checkins.length ? `<span class="stamp">IN · ${b.checkins.length}×</span>` : ''}

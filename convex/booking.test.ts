@@ -30,8 +30,8 @@ async function storedType(t: ReturnType<typeof convexTest>, code: string) {
     return blob!.type;
   });
 }
-/* One ground, one kind of pass: a "night" is the only sellable thing there is. */
-const PRICE = 599;
+/* A line with no kind is a single pass: one person, one night. */
+const PRICE = 299;
 async function firstNight(t: ReturnType<typeof convexTest>, pred: (p: any) => boolean = () => true) {
   const cat = await t.query(api.public.catalogue, {});
   return cat.nights.find(pred) as any;
@@ -48,11 +48,14 @@ const err = async (p: Promise<unknown>) => {
   throw new Error("expected an error");
 };
 
-test("catalogue is one price and one row per night", async () => {
+test("catalogue lists the nights and every kind of pass on sale", async () => {
   const t = await setup();
   const cat = await t.query(api.public.catalogue, {});
   expect(cat.nights).toHaveLength(10);
   expect(cat.price).toBe(PRICE);
+  expect(cat.kinds.map((k: any) => [k.id, k.price, k.people])).toEqual([
+    ["single", 299, 1], ["couple", 499, 2], ["group10", 2249, 10], ["group20", 3999, 20], ["season", 2000, 1],
+  ]);
   expect(cat.booking_open).toBe(true);
   expect(cat.nights.every((p: any) => p.available === p.quantity)).toBe(true);
   // nights come back in date order, every one of them dated
@@ -64,7 +67,7 @@ test("booking validates input", async () => {
   const p = await firstNight(t);
   expect(await err(t.mutation(api.public.createBooking, { name: "A", phone: "9876543210", items: [{ passId: p.id, qty: 1 }], secret: SECRET }))).toMatch(/full name/);
   expect(await err(t.mutation(api.public.createBooking, { name: "Asha", phone: "12345", items: [{ passId: p.id, qty: 1 }], secret: SECRET }))).toMatch(/mobile/);
-  expect(await err(t.mutation(api.public.createBooking, { name: "Asha", phone: "9876543210", items: [], secret: SECRET }))).toMatch(/at least one night/);
+  expect(await err(t.mutation(api.public.createBooking, { name: "Asha", phone: "9876543210", items: [], secret: SECRET }))).toMatch(/at least one pass/);
   expect(await err(t.mutation(api.public.createBooking, { name: "Asha", phone: "9876543210", items: [{ passId: p.id, qty: 1 }], secret: "short" }))).toMatch(/refresh/);
 });
 
@@ -378,22 +381,81 @@ test("admin CRUD: nights, settings, lookup, delete keeps counters right", async 
   expect(await firstNight(t, (x: any) => x.date === "2026-10-22")).toBeUndefined();
 });
 
-test("the price is one setting, and a booking keeps the price it was made at", async () => {
+test("prices are settings, and a booking keeps the price it was made at", async () => {
   const t = await setup();
   const p = await firstNight(t);
   const { code, amount } = await t.mutation(api.public.createBooking, { name: "Early Bird", phone: "9000000017", items: [{ passId: p.id, qty: 2 }], secret: SECRET });
   expect(amount).toBe(PRICE * 2);
 
-  await t.mutation(api.admin.saveSettings, { token: TOKEN, values: { pass_price: "699" } });
-  expect((await t.query(api.public.catalogue, {})).price).toBe(699);
+  await t.mutation(api.admin.saveSettings, { token: TOKEN, values: { price_single: "349" } });
+  expect((await t.query(api.public.catalogue, {})).price).toBe(349);
   // the open booking still owes what it was quoted
   expect(((await t.query(api.public.booking, { code, secret: SECRET })) as any).amount).toBe(PRICE * 2);
   // the next booking pays the new price
   const next = await t.mutation(api.public.createBooking, { name: "Late Bird", phone: "9000000018", items: [{ passId: p.id, qty: 1 }], secret: SECRET });
-  expect(next.amount).toBe(699);
+  expect(next.amount).toBe(349);
 
-  expect(await err(t.mutation(api.admin.saveSettings, { token: TOKEN, values: { pass_price: "-5" } }))).toMatch(/Pass price/);
-  expect(await err(t.mutation(api.admin.saveSettings, { token: TOKEN, values: { pass_price: "free" } }))).toMatch(/Pass price/);
+  expect(await err(t.mutation(api.admin.saveSettings, { token: TOKEN, values: { price_single: "-5" } }))).toMatch(/Pass prices/);
+  expect(await err(t.mutation(api.admin.saveSettings, { token: TOKEN, values: { price_couple: "free" } }))).toMatch(/Pass prices/);
+  // a blank price takes that kind off sale
+  await t.mutation(api.admin.saveSettings, { token: TOKEN, values: { price_group20: "" } });
+  expect((await t.query(api.public.catalogue, {})).kinds.map((k: any) => k.id)).not.toContain("group20");
+  expect(await err(t.mutation(api.public.createBooking, { name: "Big Group", phone: "9000000019", items: [{ passId: p.id, kind: "group20", qty: 1 }], secret: SECRET }))).toMatch(/not on sale/);
+});
+
+test("couple and group passes take one place per person", async () => {
+  const t = await setup();
+  const p = await firstNight(t);
+  await setNight(t, p, 32);
+  const { code, amount } = await t.mutation(api.public.createBooking, {
+    name: "Patel Parivar", phone: "9000000020", secret: SECRET,
+    items: [{ passId: p.id, kind: "couple", qty: 1 }, { passId: p.id, kind: "group10", qty: 1 }, { passId: p.id, qty: 1 }],
+  });
+  expect(amount).toBe(499 + 2249 + 299);
+  const view: any = await t.query(api.public.booking, { code, secret: SECRET });
+  expect(view.admits).toBe(13);
+  expect(view.items.map((i: any) => i.kind)).toEqual(["single", "couple", "group10"]);
+  expect((await firstNight(t, (x: any) => x.id === p.id)).available).toBe(32 - 13);
+  // 19 places left: a group of 20 doesn't fit
+  expect(await err(t.mutation(api.public.createBooking, { name: "Too Many", phone: "9000000021", items: [{ passId: p.id, kind: "group20", qty: 1 }], secret: SECRET }))).toMatch(/Only 19 places/);
+  expect(await err(t.mutation(api.public.createBooking, { name: "Odd", phone: "9000000021", items: [{ passId: p.id, kind: "vip", qty: 1 }], secret: SECRET }))).toMatch(/Unknown pass/);
+
+  // the gate admits the whole group on one check-in
+  expect((await proof(t, code)).error).toBeNull();
+  const row = (await t.query(api.admin.listBookings, { token: TOKEN, status: "pending", paginationOpts: { numItems: 20, cursor: null } })).page[0];
+  await t.mutation(api.admin.bookingAction, { token: TOKEN, id: row.id, action: "confirm" });
+  const night: any = await t.run(async (ctx: any) => ctx.db.get(p.id));
+  expect([night.held, night.sold, night.unpaid]).toEqual([13, 13, 0]);
+  // cancelling gives every place back
+  await t.mutation(api.admin.bookingAction, { token: TOKEN, id: row.id, action: "cancel" });
+  expect((await firstNight(t, (x: any) => x.id === p.id)).available).toBe(32);
+});
+
+test("a season pass is paid once and holds one place on every night to come", async () => {
+  const t = await setup();
+  const cat = await t.query(api.public.catalogue, {});
+  const { code, amount } = await t.mutation(api.public.createBooking, {
+    name: "Every Night", phone: "9000000022", secret: SECRET, items: [{ kind: "season", qty: 2 }],
+  });
+  expect(amount).toBe(2000 * 2);
+  const view: any = await t.query(api.public.booking, { code, secret: SECRET });
+  expect(view.items).toHaveLength(cat.nights.length);
+  expect(view.admits).toBe(2);
+  expect(view.payment.uri).toContain("am=4000.00");
+  for (const n of (await t.query(api.public.catalogue, {})).nights) expect(n.available).toBe(n.quantity - 2);
+
+  // a sold-out night makes the season pass unavailable
+  const last = cat.nights[cat.nights.length - 1];
+  await setNight(t, last, 2);
+  expect(await err(t.mutation(api.public.createBooking, { name: "One More", phone: "9000000023", items: [{ kind: "season", qty: 1 }], secret: SECRET }))).toMatch(/sold out/);
+  // past nights aren't part of it
+  await t.mutation(api.public.cancelBooking, { code, secret: SECRET });
+  await setNight(t, last, 10);
+  vi.setSystemTime(new Date("2026-10-19T10:00:00Z"));
+  const late = await t.mutation(api.public.createBooking, { name: "Late Season", phone: "9000000024", items: [{ kind: "season", qty: 1 }], secret: SECRET });
+  const lv: any = await t.query(api.public.booking, { code: late.code, secret: SECRET });
+  expect(lv.items.map((i: any) => i.date)).toEqual(["2026-10-19", "2026-10-20"]);
+  expect(late.amount).toBe(2000);
 });
 
 test("the ground's details are settings, and its links can't carry javascript:", async () => {

@@ -72,8 +72,39 @@
     ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
     : '';
 
-  /* There is one ground and one kind of pass; this is what it is called. */
-  const PASS = 'Garba Pass';
+  /* The kinds of pass (mirrors convex/lib.ts PASS_KINDS; prices come from the
+     catalogue). Every pass is for one night except the season pass, which
+     admits one person on every night. */
+  const KINDS = {
+    single: { label: 'Single Pass', gu: 'સિંગલ પાસ', people: 1, note: 'admits one person' },
+    couple: { label: 'Couple Pass', gu: 'કપલ પાસ', people: 2, note: 'admits two people' },
+    group10: { label: 'Group of 10', gu: '૧૦ જણનું ગ્રુપ', people: 10, note: 'admits ten people' },
+    group20: { label: 'Group of 20', gu: '૨૦ જણનું ગ્રુપ', people: 20, note: 'admits twenty people' },
+    season: { label: 'Season Pass', gu: 'સીઝન પાસ', people: 1, season: true, note: 'one person, every night' },
+  };
+  const kindLabel = (k) => (KINDS[k] || KINDS.single).label;
+  /* Booking lines as a guest thinks of them: a season pass is stored as one
+     line per night but is one thing, paid for once. */
+  function passLines(items) {
+    const out = [];
+    let season = null;
+    for (const i of items) {
+      const kind = i.kind || 'single';
+      if (kind === 'season') {
+        if (!season) out.push(season = { kind, qty: i.qty, unit_price: i.unit_price, people: 1, dates: [], total: i.qty * i.unit_price });
+        season.dates.push(i.date);
+      } else {
+        out.push({ kind, qty: i.qty, unit_price: i.unit_price, people: i.people || 1, dates: [i.date], total: i.qty * i.unit_price });
+      }
+    }
+    return out;
+  }
+  /* "Sunday, 11 October", or for a season pass "10 nights · Sun, 11 Oct – Tue, 20 Oct" */
+  function lineWhen(l, short) {
+    if (l.kind !== 'season') return (short ? dateShort : dateLong)(l.dates[0]);
+    const d = [...l.dates].sort(), n = d.length;
+    return n === 1 ? `1 night · ${dateShort(d[0])}` : `${n} nights · ${dateShort(d[0])} – ${dateShort(d[n - 1])}`;
+  }
 
   /* Navadurga — the form of the Goddess worshipped on each night */
   const NAVDURGA = [
@@ -143,5 +174,5 @@
   let cfgPromise;
   const config = () => (cfgPromise ||= q(fns.public.config));
 
-  w.MV = { q, m, a, watch, upload, secret, qr, fns, esc, inr, dateLong, dateShort, dateParts, when, PASS, NAVDURGA, toast, mine, STATUS, statusPill, busy, config };
+  w.MV = { q, m, a, watch, upload, secret, qr, fns, esc, inr, dateLong, dateShort, dateParts, when, KINDS, kindLabel, passLines, lineWhen, NAVDURGA, toast, mine, STATUS, statusPill, busy, config };
 })(window);

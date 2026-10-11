@@ -9,7 +9,7 @@
 (function () {
   'use strict';
 
-  const { q, fns, esc, inr, dateParts, PASS, NAVDURGA } = window.MV;
+  const { q, fns, esc, inr, dateParts, NAVDURGA } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -85,12 +85,14 @@
     const availLabel = !qty ? 'Passes coming soon' : left === 0 ? 'Sold out' : pct < 25 ? `Filling fast — only ${pct}% left` : pct < 60 ? `${pct}% of passes left` : 'Plenty of passes available';
     box.innerHTML = `<article class="ground">
       <div class="ph">${cfg.venue_photo ? `<img src="${esc(cfg.venue_photo)}" alt="" loading="lazy">` : ''}
-        ${price ? `<span class="from"><b>${inr(price)}</b> per night</span>` : ''}</div>
+        ${price ? `<span class="from">from <b>${inr(price)}</b> per night</span>` : ''}</div>
       <div class="bd">
         <h3>${esc(cfg.site_name || 'Mavladi Mandli')}</h3>
         ${cfg.site_name_gu ? `<p class="gu">${esc(cfg.site_name_gu)}</p>` : ''}
         <p class="meta">${range ? `<span>📅 ${esc(range)}</span>` : ''}${cfg.event_time_text ? `<span>🕗 ${esc(cfg.event_time_text)}</span>` : ''}${cfg.venue_address ? `<span>📍 ${esc(cfg.venue_address)}</span>` : ''}</p>
-        <p class="desc">One ${esc(PASS)} admits one person for one night. Pick the nights you want — ${bookable.length ? `${bookable.length} of them are open right now` : 'booking opens soon'}.</p>
+        ${cfg.pass_offer_gu ? `<p class="offer">${esc(cfg.pass_offer_gu)}</p>` : ''}
+        ${cat.kinds && cat.kinds.length ? `<ul class="gprices">${cat.kinds.map((k) => `<li><span>${esc(k.label)}<small>${k.season ? 'one person, every night' : k.people === 1 ? 'one person' : `${k.people} people`}</small></span><b>${inr(k.price)}</b></li>`).join('')}</ul>` : ''}
+        <p class="desc">Passes are per night, except the season pass. Pick the nights you want — ${bookable.length ? `${bookable.length} of them are open right now` : 'booking opens soon'}.</p>
         <div class="avail" aria-hidden="true"><i style="width:${pct}%"></i></div>
         <p class="avail-l">${availLabel}</p>
         <div class="act">

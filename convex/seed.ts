@@ -4,7 +4,7 @@
 import { internalMutation, type MutationCtx } from "./_generated/server";
 import { setSetting } from "./lib";
 
-/* Navratri plus Dussehra: ten nights. One ground, one pass per person per night. */
+/* Navratri plus Dussehra: ten nights at one ground. Stock is people per night. */
 const NIGHTS = [
   "2026-10-11", "2026-10-12", "2026-10-13", "2026-10-14", "2026-10-15",
   "2026-10-16", "2026-10-17", "2026-10-18", "2026-10-19", "2026-10-20",
@@ -23,7 +23,8 @@ export async function seedData(ctx: MutationCtx) {
 
   const faqs: [string, string][] = [
     ["Who needs a pass?", "Everyone aged 10 and above needs a pass for each night they come. Children below 10 enter free with a pass-holding adult."],
-    ["What does a pass cost?", "₹599 per person, per night. There is one kind of pass and one ground — pick the nights you want and book that many passes."],
+    ["What does a pass cost?", "Per night: Single ₹299 (one person), Couple ₹499 (two people), Group of 10 ₹2,249 and Group of 20 ₹3,999. A Season Pass for one person is ₹2,000 and covers every night. Pick the nights you want and the passes for each."],
+    ["How does a group pass work?", "One booking, one QR code: the whole group enters together at the gate on the night it is booked for. A Group of 10 admits ten people, a Group of 20 admits twenty."],
     ["How do I pay?", "Pay by any UPI app by scanning the QR code or using our UPI ID shown at checkout. Upload the payment screenshot and UTR number — our team verifies it and confirms your pass, usually within a few hours."],
     ["When is my pass confirmed?", "As soon as our team matches your payment. Track it any time from “My Pass” with your booking code and phone number. Once confirmed you get an e-pass with a QR code to show at the gate."],
     ["I paid but my booking expired. What now?", "Don’t pay twice. Contact us with your booking code and payment screenshot and we will sort it out."],

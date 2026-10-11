@@ -6,9 +6,9 @@ import { customMutation, customQuery } from "convex-helpers/server/customFunctio
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import {
-  allSettings, applyStatus, audit, clean, EDITABLE_SETTINGS, fail, fmtDate, gateNight, getSetting,
-  normPhone, normUtr, PAYMENT_SETTINGS, requireAdmin, searchText, setSetting, todayIST,
-  URL_SETTINGS, validEmail, validUrl, validPhone, type Status,
+  admits, admitsOn, allSettings, applyStatus, audit, clean, EDITABLE_SETTINGS, fail, fmtDate, gateNight,
+  itemView, kindPrices, normPhone, normUtr, PASS_KINDS, PAYMENT_SETTINGS, PRICE_SETTINGS, requireAdmin,
+  searchText, setSetting, todayIST, URL_SETTINGS, validEmail, validUrl, validPhone, type PassKind, type Status,
 } from "./lib";
 import { bookingByCode, bookingInput, createBooking, utrOwner } from "./bookings";
 import { seedData } from "./seed";
@@ -26,10 +26,11 @@ const adminMutation = customMutation(mutation, {
 /* ================= dashboard ================= */
 export const stats = adminQuery({ args: {}, handler: async (ctx) => {
   const counters = await ctx.db.query("counters").collect();
-  const price = Math.max(0, Math.floor(parseFloat(await getSetting(ctx, "pass_price")) || 0));
+  const prices = kindPrices(await allSettings(ctx));
+  const kinds = (Object.keys(PASS_KINDS) as PassKind[]).map((k) => ({ id: k, ...PASS_KINDS[k], price: prices[k] }));
   const inventory = (await ctx.db.query("passes").withIndex("by_date").collect())
     .map((p) => ({
-      id: p._id, date: p.date, price, quantity: p.quantity,
+      id: p._id, date: p.date, quantity: p.quantity,
       held: p.held, unpaid: p.unpaid, confirmed: p.sold, active: p.active,
     }));
   const night = gateNight();
@@ -41,7 +42,7 @@ export const stats = adminQuery({ args: {}, handler: async (ctx) => {
   return {
     byStatus: counters.map((c) => ({ status: c.status, n: c.n, amount: c.amount })),
     inventory, checkins_today: checkins, pending_queue: pending, today: todayIST(), night,
-    price, empty: inventory.length === 0,
+    kinds, empty: inventory.length === 0,
   };
 } });
 
@@ -51,7 +52,7 @@ const row = (b: Doc<"bookings">) => ({
   utr: b.utr ?? null, screenshot: !!b.screenshotId, source: b.source, created_at: b._creationTime,
   paid_at: b.paidAt ?? null, verified_at: b.verifiedAt ?? null, checked_in_at: b.lastCheckinAt ?? null,
   expires_at: b.expiresAt ?? null, admin_note: b.adminNote ?? null,
-  items: b.items.map((i) => ({ qty: i.qty, date: i.date, unit_price: i.unitPrice })),
+  items: itemView(b.items), admits: admits(b.items),
 });
 
 export const listBookings = adminQuery({ args: {
@@ -104,7 +105,8 @@ export const checkinLookup = adminQuery({ args: { code: v.string() }, handler: a
   const b = await bookingByCode(ctx, code);
   if (!b) return null;
   const checkins = await ctx.db.query("checkins").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect();
-  return { ...row(b), checkins: checkins.map((c) => ({ night: c.night, at: c.at })), night: gateNight() };
+  const night = gateNight();
+  return { ...row(b), checkins: checkins.map((c) => ({ night: c.night, at: c.at })), night, admits_tonight: admitsOn(b.items, night) };
 } });
 
 const RULES: Record<string, { from: Status[]; to?: Status }> = {
@@ -294,9 +296,12 @@ export const settings = adminQuery({ args: {}, handler: async (ctx) => {
 } });
 /* Shared validation for both settings paths. */
 function checkSettings(values: Record<string, string>) {
-  if (values.pass_price !== undefined) {
-    const n = parseFloat(values.pass_price);
-    if (!(n >= 0 && n <= 100000)) fail("Pass price must be a number between 0 and 100000.");
+  // a blank price takes that kind of pass off sale
+  for (const k of PRICE_SETTINGS) {
+    const val = values[k]?.trim();
+    if (!val) continue;
+    const n = Number(val);
+    if (!(n >= 0 && n <= 100000)) fail("Pass prices must be a number between 0 and 100000, or blank to stop selling that pass.");
   }
   if (values.upi_id !== undefined && !/^[\w.\-]{2,}@[\w.\-]{2,}$/.test(values.upi_id.trim())) fail("UPI ID should look like name@bank.");
   if (values.hold_minutes !== undefined) {

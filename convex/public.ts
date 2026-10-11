@@ -4,8 +4,8 @@ import { action, internalMutation, internalQuery, mutation, query } from "./_gen
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
 import {
-  allSettings, fail, LIMITS, limit, normPhone, PUBLIC_SETTINGS,
-  todayIST, upiUri, applyStatus, type Status,
+  admits, allSettings, fail, itemView, kindPrices, LIMITS, limit, normPhone, PASS_KINDS, PUBLIC_SETTINGS,
+  todayIST, upiUri, applyStatus, type PassKind, type Status,
 } from "./lib";
 import { bookingByCode, bookingInput, createBooking as create, submitProof } from "./bookings";
 
@@ -19,15 +19,19 @@ export const config = query({
   },
 });
 
-/* The nights on sale. One ground, one kind of pass: a night is a date, a price
-   and how many are left. */
+/* The nights on sale and the kinds of pass. A night is a date and how many
+   places (people) are left; a kind is a price and how many people it admits.
+   Kinds with no price are not on sale and are left out. */
 export const catalogue = query({
   args: {},
   handler: async (ctx) => {
     const today = todayIST();
     const s = await allSettings(ctx);
     const open = s.booking_open === "1";
-    const price = Math.max(0, Math.floor(parseFloat(s.pass_price) || 0));
+    const prices = kindPrices(s);
+    const kinds = (Object.keys(PASS_KINDS) as PassKind[])
+      .filter((k) => prices[k] !== null)
+      .map((k) => ({ id: k, ...PASS_KINDS[k], price: prices[k]! }));
     const nights = (await ctx.db.query("passes").withIndex("by_date").collect())
       .filter((p) => p.active)
       .map((p) => {
@@ -38,7 +42,8 @@ export const catalogue = query({
           past, bookable: open && !past && available > 0,
         };
       });
-    return { today, price, booking_open: open, nights };
+    // price: one person, one night — the headline number on the home page
+    return { today, price: prices.single ?? 0, kinds, booking_open: open, nights };
   },
 });
 
@@ -81,8 +86,8 @@ export const booking = query({
       created_at: b._creationTime, expires_at: b.expiresAt ?? null, paid_at: b.paidAt ?? null,
       verified_at: b.verifiedAt ?? null, checkins: checkins.map((c) => c.night),
       message: ["rejected", "awaiting_payment", "cancelled"].includes(status) ? b.adminNote ?? null : null,
-      items: b.items.map((i) => ({ date: i.date, qty: i.qty, unit_price: i.unitPrice })),
-      admits: b.items.reduce((s, i) => s + i.qty, 0),
+      items: itemView(b.items),
+      admits: admits(b.items),
     };
     if (status === "awaiting_payment") {
       const s = await allSettings(ctx);

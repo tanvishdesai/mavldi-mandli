@@ -17,20 +17,25 @@ export const bookingStatus = v.union(
   v.literal("expired"),
 );
 
-/* One line of a booking: n passes for one night. There is a single ground and a
-   single kind of pass, so a line needs only the night and what it cost — the
-   price is snapshotted so changing it later doesn't rewrite history. */
+/* One line of a booking: n passes of one kind for one night. The price and the
+   head-count are snapshotted so changing them later doesn't rewrite history.
+   A season pass is one line per night, all of the same kind and qty, paid for
+   once (lib.itemsAmount). Lines from before pass kinds existed have neither
+   field and read as single passes. */
 export const bookingItem = v.object({
   passId: v.id("passes"),
   date: v.string(), // YYYY-MM-DD
   qty: v.number(),
   unitPrice: v.number(),
+  kind: v.optional(v.string()), // lib.PASS_KINDS; absent = single
+  people: v.optional(v.number()), // admitted per pass; absent = 1
 });
 
 export default defineSchema({
   settings: defineTable({ key: v.string(), value: v.string() }).index("by_key", ["key"]),
 
-  /* One row per night of the event: the stock for that night. */
+  /* One row per night of the event: the stock for that night, counted in people
+     (a couple pass takes two, a group of 10 takes ten). */
   passes: defineTable({
     date: v.string(), // YYYY-MM-DD
     quantity: v.number(),

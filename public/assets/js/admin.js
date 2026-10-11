@@ -2,7 +2,7 @@
    Every call carries the session token that auth.login registered. */
 (function () {
   'use strict';
-  const { q, m, a, watch, upload, secret, fns, esc, inr, dateShort, when, PASS, toast, statusPill, busy, STATUS } = window.MV;
+  const { q, m, a, watch, upload, secret, fns, esc, inr, dateShort, when, KINDS, kindLabel, passLines, lineWhen, toast, statusPill, busy, STATUS } = window.MV;
   const $ = (s, r = document) => r.querySelector(s);
   const $$ = (s, r = document) => [...r.querySelectorAll(s)];
   const app = $('#app');
@@ -119,7 +119,7 @@
   function drawDashboard(pane, s) {
     if (s.empty) {
       pane.innerHTML = head('Welcome 🙏', 'No nights are set up yet') + `<div class="panel2"><div class="pad" style="display:grid;gap:12px;justify-items:start">
-        <p>Add the nights you are selling passes for, or load the sample data (ten nights of Navratri 2026 plus FAQs) and edit it. The pass price lives in Settings.</p>
+        <p>Add the nights you are selling passes for, or load the sample data (ten nights of Navratri 2026 plus FAQs) and edit it. Pass prices live in Settings.</p>
         <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" id="sample" type="button">Load sample data</button><a class="btn ghost sm" href="#passes">Add nights</a></div></div></div>`;
       $('#sample').onclick = async (e) => { busy(e.target, true, 'Loading…'); try { await M(F.loadSampleData); toast('Sample data loaded', 'ok'); } catch (x) { busy(e.target, false); toast(x.message, 'bad'); } };
       return;
@@ -128,11 +128,11 @@
     const soldQty = s.inventory.reduce((a, i) => a + i.confirmed, 0);
     const heldQty = s.inventory.reduce((a, i) => a + i.held, 0);
     const def = me.default_password ? `<div class="notice bad" style="margin-bottom:16px">⚠ You are still using the default admin password. <a href="#settings">Change it now</a>.</div>` : '';
-    pane.innerHTML = head('Dashboard', `Today is ${esc(dateShort(s.today))} · ${inr(s.price)} per pass · updates live`, '<a class="btn sm" href="#bookings">Open verification queue</a>') + def + `
+    pane.innerHTML = head('Dashboard', `Today is ${esc(dateShort(s.today))} · ${s.kinds.filter((k) => k.price !== null).map((k) => `${esc(k.label)} ${inr(k.price)}`).join(' · ') || 'no passes on sale'} · updates live`, '<a class="btn sm" href="#bookings">Open verification queue</a>') + def + `
       <div class="tiles">
         <a class="tile hot" href="#bookings"><span>Waiting for verification</span><b>${st('pending').n}</b><small>${inr(st('pending').amount)} to check</small></a>
         <div class="tile"><span>Confirmed revenue</span><b>${inr(st('confirmed').amount)}</b><small>${st('confirmed').n} bookings</small></div>
-        <div class="tile"><span>Passes sold (confirmed)</span><b>${soldQty}</b><small>${heldQty} held incl. unpaid &amp; pending</small></div>
+        <div class="tile"><span>Places sold (confirmed)</span><b>${soldQty}</b><small>people-nights · ${heldQty} held incl. unpaid &amp; pending</small></div>
         <div class="tile"><span>Awaiting payment</span><b>${st('awaiting_payment').n}</b><small>holds that may expire</small></div>
         <a class="tile" href="#checkin"><span>Checked in tonight</span><b>${s.checkins_today}</b><small>bookings admitted</small></a>
         <div class="tile"><span>Rejected / expired</span><b>${st('rejected').n + st('expired').n}</b><small>${st('cancelled').n} cancelled</small></div>
@@ -185,11 +185,11 @@
   function drawBookings(box, res) {
     lastRows = res.page;
     if (!res.page.length && res.isDone) { box.innerHTML = `<div class="empty-state">${bstate.status === 'pending' ? 'No payments waiting for verification. 🪔' : 'No bookings match.'}</div>`; return; }
-    box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Guest</th><th>Nights</th><th class="num">Amount</th><th>UTR</th><th>Status</th><th>${bstate.status === 'pending' ? 'Paid' : 'Created'}</th></tr></thead><tbody>
+    box.innerHTML = `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>Code</th><th>Guest</th><th>Passes</th><th class="num">Amount</th><th>UTR</th><th>Status</th><th>${bstate.status === 'pending' ? 'Paid' : 'Created'}</th></tr></thead><tbody>
       ${res.page.map((b) => `<tr class="click" data-id="${b.id}">
         <td class="mono">${esc(b.code)}${b.source === 'counter' ? ' <span class="pill mute">counter</span>' : ''}</td>
         <td>${esc(b.name)}<div class="muted sm">${esc(b.phone)}</div></td>
-        <td class="sm">${b.items.map((i) => `${i.qty}× <span class="muted">${esc(dateShort(i.date))}</span>`).join('<br>')}</td>
+        <td class="sm">${passLines(b.items).map((l) => `${l.qty}× ${esc(kindLabel(l.kind))} <span class="muted">${esc(lineWhen(l, true))}</span>`).join('<br>')}</td>
         <td class="num">${inr(b.amount)}</td>
         <td class="mono sm">${esc(b.utr || '—')}${b.screenshot ? ' 🖼' : ''}</td>
         <td>${statusPill(b.status)}${b.checked_in_at ? ' <span class="pill ok">in</span>' : ''}</td>
@@ -224,11 +224,11 @@
         return /[",\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
       };
       const iso = (ts) => (ts ? new Date(ts).toISOString() : '');
-      const head = ['code', 'status', 'name', 'phone', 'email', 'amount', 'utr', 'nights', 'passes', 'source', 'created_at', 'paid_at', 'verified_at', 'last_checkin_at', 'admin_note', 'customer_note'];
+      const head = ['code', 'status', 'name', 'phone', 'email', 'amount', 'utr', 'passes', 'admits', 'source', 'created_at', 'paid_at', 'verified_at', 'last_checkin_at', 'admin_note', 'customer_note'];
       const lines = [head.join(',')].concat(rows.map((b) => [
         b.code, b.status, b.name, b.phone, b.email, b.amount, b.utr,
-        b.items.map((i) => `${i.qty}x ${i.date}`).join('; '),
-        b.items.reduce((s2, i) => s2 + i.qty, 0), b.source,
+        passLines(b.items).map((l) => `${l.qty}x ${kindLabel(l.kind)} ${l.kind === 'season' ? 'season' : l.dates[0]}`).join('; '),
+        b.admits, b.source,
         iso(b.created_at), iso(b.paid_at), iso(b.verified_at), iso(b.checked_in_at), b.admin_note, b.customer_note,
       ].map(cell).join(',')));
       const blob = new Blob(['\ufeff' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
@@ -279,7 +279,7 @@
     current = b;
     b.ticket_url = `${location.origin}/ticket?code=${encodeURIComponent(b.code)}&t=${encodeURIComponent(b.secret)}`;
     const shot = b.screenshot_url;
-    const admits = b.items.reduce((s, i) => s + i.qty, 0);
+    const admits = b.admits;
     const waMsg = b.status === 'confirmed'
       ? `Jay Mataji ${b.name.split(' ')[0]}! 🙏 Your Mavladi Mandli booking ${b.code} is CONFIRMED. Your e-pass (show the QR at the gate): ${b.ticket_url}`
       : b.status === 'rejected'
@@ -303,7 +303,7 @@
             <p class="muted sm">Match the amount and UTR against your bank / UPI app statement before confirming.</p>
           </div>
           <div class="dsec"><h3>Passes · admits ${admits}</h3>
-            <ul class="itemlist" style="list-style:none;margin:0;padding:0;display:grid;gap:6px">${b.items.map((i) => `<li style="display:flex;justify-content:space-between;gap:10px"><span>${i.qty} × ${esc(PASS)} <span class="muted">· ${esc(dateShort(i.date))}</span></span><b>${inr(i.qty * i.unit_price)}</b></li>`).join('')}</ul>
+            <ul class="itemlist" style="list-style:none;margin:0;padding:0;display:grid;gap:6px">${passLines(b.items).map((l) => `<li style="display:flex;justify-content:space-between;gap:10px"><span>${l.qty} × ${esc(kindLabel(l.kind))} <span class="muted">· ${esc(lineWhen(l, true))}</span></span><b>${inr(l.total)}</b></li>`).join('')}</ul>
             ${b.checkins.length ? `<p class="sm">Checked in: ${b.checkins.map((c) => `${esc(dateShort(c.night))} ${esc(when(c.at).split(', ').pop())}`).join(' · ')}</p>` : ''}
           </div>
           <div class="dsec"><h3>Guest <button class="iconbtn" type="button" id="editG" style="float:right">Edit</button></h3>
@@ -394,11 +394,13 @@
 
   function counterBooking() {
     Q(F.passes).then((ps) => {
-      const opts = ps.filter((p) => p.active).map((p) => ({ v: p.id, l: `${dateShort(p.date)} — ${p.quantity - p.held} left` }));
+      const opts = ps.filter((p) => p.active).map((p) => ({ v: p.id, l: `${dateShort(p.date)} — ${p.quantity - p.held} places left` }));
+      const kinds = Object.entries(KINDS).map(([k, d]) => ({ v: k, l: d.season ? `${d.label} (every night to come — night is ignored)` : `${d.label} (admits ${d.people})` }));
       formModal({
         title: 'Counter / manual booking',
-        intro: 'For cash or offline sales. Stock is checked; it is marked confirmed unless you choose otherwise. The price is the one in Settings.',
+        intro: 'For cash or offline sales. Stock is checked; it is marked confirmed unless you choose otherwise. Prices are the ones in Settings.',
         fields: [
+          { name: 'kind', label: 'Pass', type: 'select', options: kinds, required: true, full: true },
           { name: 'pass', label: 'Night', type: 'select', options: opts, required: true, full: true },
           { name: 'qty', label: 'Passes', type: 'number', min: 1, required: true },
           { name: 'status', label: 'Status', type: 'select', options: [{ v: 'confirmed', l: 'Confirmed (paid)' }, { v: 'pending', l: 'Pending verification' }] },
@@ -407,11 +409,11 @@
           { name: 'utr', label: 'UTR / receipt no. (optional)' },
           { name: 'note', label: 'Internal note', full: true },
         ],
-        values: { qty: 1, status: 'confirmed' },
+        values: { kind: 'single', qty: 1, status: 'confirmed' },
         submit: async (v) => {
           const b = await M(F.counterBooking, {
             name: v.name, phone: v.phone, note: v.note || undefined, utr: v.utr || undefined, status: v.status,
-            items: [{ passId: v.pass, qty: Number(v.qty) }], secret: secret(),
+            items: [v.kind === 'season' ? { kind: v.kind, qty: Number(v.qty) } : { kind: v.kind, passId: v.pass, qty: Number(v.qty) }], secret: secret(),
           });
           toast(`Booking ${b.code} created`, 'ok');
           openBooking(b.id);
@@ -464,10 +466,10 @@
     let b;
     try { b = await Q(F.checkinLookup, { code }); } catch (e) { box.innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
     if (!b) { box.innerHTML = '<div class="verdict bad"><h2>✕ Not found</h2><p>No booking with that code.</p></div>'; return; }
-    const admits = b.items.reduce((s, i) => s + i.qty, 0);
+    const admits = b.admits_tonight;
     const tonight = b.checkins.find((c) => c.night === b.night);
     const validTonight = b.items.some((i) => i.date === b.night);
-    const items = `<ul>${b.items.map((i) => `<li>${i.qty} × ${esc(PASS)} · ${esc(dateShort(i.date))}</li>`).join('')}</ul>`;
+    const items = `<ul>${passLines(b.items).map((l) => `<li>${l.qty} × ${esc(kindLabel(l.kind))}${l.people > 1 ? ` (${l.qty * l.people} people)` : ''} · ${esc(lineWhen(l, true))}</li>`).join('')}</ul>`;
     let cls, title, btn = '';
     if (b.status !== 'confirmed') { cls = 'bad'; title = `✕ Not confirmed (${esc((STATUS[b.status] || [b.status])[0])})`; }
     else if (tonight) { cls = 'warn'; title = `Already checked in at ${esc(when(tonight.at).split(', ').pop())}`; }
@@ -489,13 +491,14 @@
   addEventListener('hashchange', () => { if (!location.hash.startsWith('#checkin')) stopScan(); });
 
   /* ================= nights & stock ================= */
-  /* One ground and one pass type, so the only thing to manage per night is how
-     many passes exist and whether they are on sale. The price is in Settings. */
+  /* One ground, so the only thing to manage per night is how many places
+     (people) exist and whether they are on sale. A couple pass takes two places,
+     a group of 10 ten, a season pass one on every night. Prices are in Settings. */
   async function passes(pane) {
     pane.dataset.view = 'passes';
-    pane.innerHTML = head('Nights & stock', 'One row per night: how many passes exist, and how many are gone',
+    pane.innerHTML = head('Nights & stock', 'One row per night: how many places (people) exist, and how many are gone',
       '<button class="btn ghost sm" id="bulkP" type="button">+ Add a range of nights</button><button class="btn sm" id="addP" type="button">+ Add night</button>') + `
-      <div class="filters"><span class="muted sm">“Held” counts unpaid holds, payments awaiting verification and confirmed passes. The pass price is set under <a href="#settings">Settings</a>.</span></div>
+      <div class="filters"><span class="muted sm">“Held” counts unpaid holds, payments awaiting verification and confirmed passes, counted in people. Pass prices are set under <a href="#settings">Settings</a>.</span></div>
       <div class="panel2" id="pbox"><div class="empty-state">Loading…</div></div>`;
     $('#addP').onclick = () => nightForm();
     $('#bulkP').onclick = bulkForm;
@@ -600,8 +603,12 @@
       { name: 'upi_payee_name', label: 'Payee name', required: true },
     ];
     const groups = [
-      ['The pass', [
-        { name: 'pass_price', label: 'Price per pass (₹)', type: 'number', min: 0, help: 'One pass, one person, one night. This is the only price there is — changing it does not alter bookings already made.' },
+      ['Passes & prices', [
+        ...Object.entries(KINDS).map(([k, d]) => ({
+          name: `price_${k}`, label: `${d.label} (₹)`, placeholder: 'blank = not on sale',
+          help: d.season ? 'One person, every night still to come.' : `Admits ${d.people} for one night.`,
+        })),
+        { name: 'pass_offer_gu', label: 'Offer line (booking page)', full: true, help: 'Changing a price does not alter bookings already made. Leave a price blank to stop selling that pass.' },
         { name: 'max_items_per_booking', label: 'Max passes per booking', type: 'number', min: 1 },
         { name: 'booking_open', label: 'Online booking open', type: 'switch', full: true },
       ]],
@@ -626,7 +633,7 @@
         { name: 'contact_email', label: 'Email', type: 'email' }, { name: 'instagram_url', label: 'Instagram URL' }, { name: 'youtube_url', label: 'YouTube URL' },
       ]],
     ];
-    pane.innerHTML = head('Settings', 'The price, the ground, payment details, event text and contact info') + `<form class="sgrid" id="sform" novalidate>
+    pane.innerHTML = head('Settings', 'Pass prices, the ground, payment details, event text and contact info') + `<form class="sgrid" id="sform" novalidate>
       ${groups.map(([t, fs]) => `<section class="panel2"><h2>${t}</h2><div class="pad">${fs.map((f) => fieldHtml(f, s[f.name])).join('')}</div></section>`).join('')}
       <div class="savebar"><button class="btn" type="submit">Save settings</button></div></form>
       <form class="sgrid" id="payform" style="margin-top:10px" novalidate><section class="panel2"><h2>Payment (UPI) — where the money goes</h2><div class="pad">

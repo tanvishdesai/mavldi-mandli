@@ -44,7 +44,22 @@ body.paper::before {
 .sec-title h2 { font-family: var(--f-display); font-size: 1.6rem; color: var(--maroon-700); }
 .sec-title span { color: var(--ink-3); font-size: 0.9rem; }
 
-.nightgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 14px; }
+.nightgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.ncard .prow { padding: 10px 14px; gap: 10px; }
+.ncard .prow .pr { font-size: 1.15rem; }
+.ncard.season { margin-bottom: 8px; border-color: var(--gold); background: linear-gradient(135deg, var(--paper), var(--parchment)); }
+.ncard.season.has { border-color: var(--red); }
+.ncard .cal.star { display: grid; place-items: center; height: 60px; font-size: 1.8rem; background: var(--maroon-700); box-shadow: none; }
+
+.pagehead .offer { margin-top: 10px; font-size: 1.05rem; font-weight: 600; color: var(--maroon-700); }
+.pricelist { list-style: none; margin: 0 0 18px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.pricelist li {
+  display: grid; grid-template-columns: auto auto; gap: 0 8px; align-items: baseline;
+  padding: 8px 14px; border-radius: 12px; background: var(--paper); border: 1px solid var(--line); box-shadow: var(--shadow-sm);
+}
+.pricelist li b { font-weight: 600; font-size: 0.9rem; }
+.pricelist li span { font-family: var(--f-display); font-weight: 700; font-size: 1.15rem; color: var(--red); justify-self: end; }
+.pricelist li small { grid-column: 1 / -1; color: var(--ink-3); font-size: 0.76rem; }
 .ncard {
   position: relative; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r);
   box-shadow: var(--shadow-sm); overflow: hidden; transition: box-shadow 0.25s, border-color 0.25s;

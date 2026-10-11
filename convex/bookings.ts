@@ -3,8 +3,9 @@ import { internalMutation, type MutationCtx, type QueryCtx } from "./_generated/
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
-  applyStatus, clean, fail, getSetting, isHolding, LIMITS, limit, normPhone, normUtr, searchText,
-  todayIST, validEmail, validPhone, fmtDate, shortfall, type Status,
+  allSettings, applyStatus, clean, fail, getSetting, heads, isHolding, isKind, itemsAmount, kindPrices, LIMITS,
+  limit, MAX_PEOPLE, normPhone, normUtr, PASS_KINDS, searchText, todayIST, validEmail, validPhone, fmtDate,
+  shortfall, type PassKind, type Status,
 } from "./lib";
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -29,16 +30,20 @@ export const bookingInput = {
   phone: v.string(),
   email: v.optional(v.string()),
   note: v.optional(v.string()),
-  items: v.array(v.object({ passId: v.id("passes"), qty: v.number() })),
+  /* kind defaults to "single". A season pass names no night: it covers every
+     night still on sale. */
+  items: v.array(v.object({ passId: v.optional(v.id("passes")), kind: v.optional(v.string()), qty: v.number() })),
 };
+type InputItem = { passId?: Id<"passes">; kind?: string; qty: number };
 
 type CreateOpts = { admin?: boolean; status?: Status; source?: string; secret: string; utr?: string };
 
 /* Shared by the public checkout and the admin counter booking.
-   One ground, one kind of pass: a booking is just "n passes for night X". */
+   One ground; a booking is "n passes of kind K for night X", plus any season
+   passes, which become one line on every night still to come. */
 export async function createBooking(
   ctx: MutationCtx,
-  input: { name: string; phone: string; email?: string; note?: string; items: { passId: Id<"passes">; qty: number }[] },
+  input: { name: string; phone: string; email?: string; note?: string; items: InputItem[] },
   opts: CreateOpts,
 ) {
   const admin = !!opts.admin;
@@ -71,39 +76,77 @@ export async function createBooking(
     }
   }
 
-  const want = new Map<Id<"passes">, number>();
+  // merge repeats: kind + night (season passes have no night of their own)
+  const want = new Map<string, { kind: PassKind; passId?: Id<"passes">; qty: number }>();
   for (const it of input.items) {
     const qty = Math.floor(it.qty);
-    if (qty >= 1) want.set(it.passId, (want.get(it.passId) || 0) + qty);
+    if (!(qty >= 1)) continue;
+    const kind = it.kind ?? "single";
+    if (!isKind(kind)) fail("Unknown pass type. Please refresh the page.");
+    const season = PASS_KINDS[kind as PassKind].season;
+    if (!season && !it.passId) fail("Pick a night for every pass.");
+    const key = season ? kind : `${kind}:${it.passId}`;
+    const cur = want.get(key);
+    want.set(key, { kind: kind as PassKind, passId: season ? undefined : it.passId, qty: (cur?.qty ?? 0) + qty });
   }
-  if (!want.size) fail("Pick at least one night.");
+  if (!want.size) fail("Pick at least one pass.");
   const maxTotal = parseInt(await getSetting(ctx, "max_items_per_booking"), 10) || 20;
-  const totalQty = [...want.values()].reduce((a, b) => a + b, 0);
+  const totalQty = [...want.values()].reduce((a, b) => a + b.qty, 0);
   if (!admin && totalQty > maxTotal) fail(`You can book at most ${maxTotal} passes at a time.`);
 
-  // the one price there is; snapshotted per line so a later change leaves history alone
-  const price = Math.max(0, Math.floor(parseFloat(await getSetting(ctx, "pass_price")) || 0));
+  // prices are snapshotted per line so a later change leaves history alone
+  const prices = kindPrices(await allSettings(ctx));
   const today = todayIST();
+  const nights = new Map<Id<"passes">, Doc<"passes">>();
+  const night = async (id: Id<"passes">) => {
+    if (!nights.has(id)) {
+      const p = await ctx.db.get(id);
+      if (!p) fail("One of the nights you picked is no longer on sale. Please refresh.");
+      nights.set(id, p!);
+    }
+    return nights.get(id)!;
+  };
   const items: Doc<"bookings">["items"] = [];
-  for (const [id, qty] of want) {
-    const p = await ctx.db.get(id);
-    if (!p) fail("One of the nights you picked is no longer on sale. Please refresh.");
-    const what = fmtDate(p!.date);
-    if (!admin && (!p!.active || p!.date < today)) fail(`${what} is not on sale any more.`);
-    const available = p!.quantity - p!.held;
-    if (qty > available) fail(available > 0 ? `Only ${available} left for ${what}.` : `${what} just sold out.`, "SOLD_OUT");
+  for (const line of want.values()) {
+    const k = PASS_KINDS[line.kind];
+    const price = prices[line.kind];
+    if (price === null) fail(`The ${k.label} is not on sale right now. Please refresh.`);
+    let covers: Doc<"passes">[];
+    if (k.season) {
+      covers = (await ctx.db.query("passes").withIndex("by_date").collect()).filter((p) => p.active && p.date >= today);
+      if (!covers.length) fail("There are no nights left for a season pass.");
+      for (const p of covers) nights.set(p._id, p);
+    } else {
+      const p = await night(line.passId!);
+      if (!admin && (!p.active || p.date < today)) fail(`${fmtDate(p.date)} is not on sale any more.`);
+      covers = [p];
+    }
+    for (const p of covers) {
+      items.push({ passId: p._id, date: p.date, qty: line.qty, unitPrice: price!, kind: line.kind, people: k.people });
+    }
+  }
+
+  // stock is counted in people, per night, across every kind on that night
+  const need = new Map<Id<"passes">, number>();
+  for (const it of items) need.set(it.passId, (need.get(it.passId) || 0) + heads(it));
+  for (const [id, n] of need) {
+    const p = nights.get(id)!;
+    const what = fmtDate(p.date);
+    const available = p.quantity - p.held;
+    if (n > available) fail(available > 0 ? `Only ${available} places left for ${what}.` : `${what} just sold out.`, "SOLD_OUT");
     /* Unpaid holds may never cover more than a quarter of a night. Nobody paying
-       normally notices; a flood of fake holds can delay at most 25% of sales. */
+       normally notices; a flood of fake holds can delay at most 25% of sales.
+       The floor lets one honest booking of the largest group through. */
     if (!admin) {
-      const unpaidCap = Math.max(maxTotal, Math.floor(p!.quantity * LIMITS.unpaidShareOfStock));
-      if (p!.unpaid + qty > unpaidCap) {
+      const unpaidCap = Math.max(maxTotal, MAX_PEOPLE, Math.floor(p.quantity * LIMITS.unpaidShareOfStock));
+      if (p.unpaid + n > unpaidCap) {
         fail(`${what} has a lot of unpaid holds right now. Please try again in a few minutes.`, "BUSY");
       }
     }
-    items.push({ passId: p!._id, date: p!.date, qty, unitPrice: price });
   }
-  items.sort((a, b) => a.date.localeCompare(b.date));
-  const amount = items.reduce((s, i) => s + i.unitPrice * i.qty, 0);
+  const order = Object.keys(PASS_KINDS);
+  items.sort((a, b) => a.date.localeCompare(b.date) || order.indexOf(a.kind!) - order.indexOf(b.kind!));
+  const amount = itemsAmount(items);
 
   let code = newCode();
   while (await ctx.db.query("bookings").withIndex("by_code", (q) => q.eq("code", code)).unique()) code = newCode();

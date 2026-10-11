@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Book Passes — Mavladi Mandli</title>
-  <meta name="description" content="Book Mavladi Mandli Navratri garba passes. Pick your nights, pay by UPI. One pass, one price.">
+  <meta name="description" content="Book Mavladi Mandli Navratri garba passes. Single, couple, group and season passes. Pick your nights, pay by UPI.">
   <meta name="theme-color" content="#f4e7cf">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,7 +29,8 @@
       <span class="branch r" aria-hidden="true"></span>
       <p class="gu">પાસ બુક કરો</p>
       <h1 id="pageTitle">Book your passes</h1>
-      <p class="sub" id="pageSub">One pass, <b id="priceLine">one price</b>. Choose your nights and pay by UPI.</p>
+      <p class="sub" id="pageSub">Single, couple, group or season passes. Choose your nights and pay by UPI.</p>
+      <p class="offer gu" id="offerLine" hidden></p>
     </div>
 
     <ol class="stepper" id="stepper">
@@ -44,10 +45,11 @@
       <div>
         <div id="closedNote" class="notice bad" hidden>Online bookings are closed right now. Please check back soon.</div>
         <p class="groundinfo" id="groundInfo"></p>
+        <ul class="pricelist" id="priceList" aria-label="Pass prices"></ul>
         <div id="passArea"><p class="summary empty">Loading nights…</p></div>
       </div>
       <aside class="card frame summary pick" aria-label="Your selection">
-        <h3>Your nights</h3>
+        <h3>Your passes</h3>
         <div id="sumBody"></div>
       </aside>
     </section>
